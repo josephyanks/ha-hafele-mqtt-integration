@@ -37,3 +37,13 @@ CONF_POLLING_TIMEOUT = "polling_timeout"
 CONF_ENABLE_GROUPS = "enable_groups"
 CONF_ENABLE_SCENES = "enable_scenes"
 
+# MQTT Broker Configuration (optional - uses HA MQTT if not provided)
+CONF_MQTT_BROKER = "mqtt_broker"
+CONF_MQTT_PORT = "mqtt_port"
+CONF_MQTT_USERNAME = "mqtt_username"
+CONF_MQTT_PASSWORD = "mqtt_password"
+CONF_USE_HA_MQTT = "use_ha_mqtt"  # Use Home Assistant's MQTT integration
+
+# Default MQTT broker settings
+DEFAULT_MQTT_PORT = 1883
+

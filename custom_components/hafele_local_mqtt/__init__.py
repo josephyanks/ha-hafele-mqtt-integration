@@ -24,9 +24,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     topic_prefix = entry.data.get("topic_prefix", "hafele")
     polling_interval = entry.data.get("polling_interval", 30)
     polling_timeout = entry.data.get("polling_timeout", 5)
+    
+    # Get MQTT broker configuration
+    use_ha_mqtt = entry.data.get("use_ha_mqtt", True)
+    mqtt_broker = entry.data.get("mqtt_broker") if not use_ha_mqtt else None
+    mqtt_port = entry.data.get("mqtt_port", 1883) if not use_ha_mqtt else 1883
+    mqtt_username = entry.data.get("mqtt_username") if not use_ha_mqtt else None
+    mqtt_password = entry.data.get("mqtt_password") if not use_ha_mqtt else None
 
     # Initialize MQTT client
-    mqtt_client = HafeleMQTTClient(hass, topic_prefix)
+    mqtt_client = HafeleMQTTClient(
+        hass,
+        topic_prefix,
+        broker=mqtt_broker,
+        port=mqtt_port,
+        username=mqtt_username,
+        password=mqtt_password,
+    )
     await mqtt_client.async_connect()
 
     # Initialize discovery

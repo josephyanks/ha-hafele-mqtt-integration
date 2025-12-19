@@ -5,6 +5,11 @@
         "title": "Hafele Local MQTT",
         "description": "Configure your Hafele Local MQTT integration",
         "data": {
+          "use_ha_mqtt": "Use Home Assistant MQTT Broker",
+          "mqtt_broker": "MQTT Broker Host",
+          "mqtt_port": "MQTT Broker Port",
+          "mqtt_username": "MQTT Username",
+          "mqtt_password": "MQTT Password",
           "topic_prefix": "MQTT Topic Prefix",
           "polling_interval": "Polling Interval (seconds)",
           "polling_timeout": "Polling Timeout (seconds)",
@@ -16,6 +21,8 @@
     "error": {
       "cannot_connect": "Unable to connect to MQTT broker",
       "invalid_auth": "Invalid authentication",
+      "mqtt_broker_required": "MQTT broker host is required when not using Home Assistant MQTT",
+      "ha_mqtt_not_connected": "Home Assistant MQTT broker is not connected",
       "unknown": "Unexpected error"
     },
     "abort": {
