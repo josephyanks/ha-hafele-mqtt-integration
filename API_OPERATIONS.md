@@ -91,7 +91,7 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 ```json
 {
   "device_name": "string",
-  "onOff": "on" | "off",
+  "onoff": 1,
   "lightness": 0.0-1.0,
   "temperature": 800-20000,
   "hue": 0-360,
@@ -101,11 +101,13 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 
 **Parameters:**
 - `device_name` (string): Name of the light device
-- `onOff` (string): Power state - `"on"` or `"off"`
+- `onoff` (integer): Power state - `1` for on, `0` for off (note: status responses use numeric format, commands use string format)
 - `lightness` (number, 0-1): Lightness level (0.0 to 1.0)
 - `temperature` (integer, 800-20000): Color temperature in Kelvin
 - `hue` (integer, 0-360): Hue value
 - `saturation` (number, 0-1): Saturation level (0.0 to 1.0)
+
+**Note:** Status responses use `"onoff"` (lowercase) with numeric values (1/0), while commands use `"onOff"` (camelCase) with string values ("on"/"off").
 
 ---
 

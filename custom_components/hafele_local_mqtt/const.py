@@ -29,6 +29,7 @@ TOPIC_DISCOVERY_SCENES = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_SCENES}"  # {gateway_to
 TOPIC_DEVICE_POWER = "{prefix}/lights/{device_name}/power"  # setDevicePower / getDevicePower
 TOPIC_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightness"  # setDeviceLightness / getDeviceLightness
 TOPIC_GROUP_POWER = "{prefix}/groups/{group_name}/power"  # setGroupPower / getGroupPower
+TOPIC_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # setGroupLightness / getGroupLightness
 TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"  # recallScene
 
 # Status topics (RECEIVE - Subscribe)
