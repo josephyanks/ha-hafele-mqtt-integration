@@ -1,10 +1,7 @@
 {
     "name": "Hafele Local MQTT",
     "country": "US",
-    "homeassistant": "2024.1.0",
+    "homeassistant": "2024.5.5",
     "hide_default_branch": true,
-    "render_readme": true,
-    "content_in_root": false,
-    "domains": ["hafele_local_mqtt"],
-    "iot_class": "Local Push"
+    "render_readme": true
 }

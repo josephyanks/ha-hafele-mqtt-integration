@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    EVENT_DEVICES_UPDATED,
     TOPIC_DISCOVERY_GROUPS,
     TOPIC_DISCOVERY_LIGHTS,
     TOPIC_DISCOVERY_SCENES,
@@ -88,7 +89,7 @@ class HafeleDiscovery:
 
             # Notify that devices have been updated
             # Platforms will check discovery on their next update
-            self.hass.bus.async_fire("hafele_local_mqtt_devices_updated")
+            self.hass.bus.async_fire(EVENT_DEVICES_UPDATED)
 
         except (json.JSONDecodeError, KeyError, TypeError) as err:
             _LOGGER.error("Error parsing lights message: %s", err)

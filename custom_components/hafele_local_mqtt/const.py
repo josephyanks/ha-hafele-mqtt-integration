@@ -47,3 +47,6 @@ CONF_USE_HA_MQTT = "use_ha_mqtt"  # Use Home Assistant's MQTT integration
 # Default MQTT broker settings
 DEFAULT_MQTT_PORT = 1883
 
+# Event names
+EVENT_DEVICES_UPDATED = "hafele_local_mqtt_devices_updated"
+

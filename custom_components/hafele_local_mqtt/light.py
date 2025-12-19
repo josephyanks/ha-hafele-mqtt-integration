@@ -22,6 +22,7 @@ from homeassistant.helpers.update_coordinator import (
 
 from .const import (
     DOMAIN,
+    EVENT_DEVICES_UPDATED,
     TOPIC_DEVICE_GET,
     TOPIC_DEVICE_RESPONSE,
     TOPIC_DEVICE_SET,
@@ -160,34 +161,73 @@ async def async_setup_entry(
     polling_interval = data["polling_interval"]
     polling_timeout = data["polling_timeout"]
 
-    # Get discovered devices
-    devices = discovery.get_all_devices()
+    # Track which entities we've already created
+    created_entities: set[int] = set()
 
-    entities = []
-    for device_addr, device_info in devices.items():
-        # Only create entities for lights
-        device_types = device_info.get("device_types", [])
-        if "Light" not in device_types:
-            continue
+    async def _create_entities_for_devices() -> None:
+        """Create entities for all discovered light devices."""
+        devices = discovery.get_all_devices()
+        new_entities = []
 
-        # Create coordinator for polling
-        coordinator = HafeleLightCoordinator(
-            hass,
-            mqtt_client,
-            device_addr,
-            topic_prefix,
-            polling_interval,
-            polling_timeout,
-        )
+        for device_addr, device_info in devices.items():
+            # Skip if we've already created this entity
+            if device_addr in created_entities:
+                continue
 
-        # Set up subscriptions
-        await coordinator._async_setup_subscriptions()
+            # Only create entities for lights
+            # Since these come from the lights discovery topic, they should all be lights
+            # But check device_types if it exists to be safe
+            device_types = device_info.get("device_types", [])
+            if device_types and "Light" not in device_types:
+                _LOGGER.debug(
+                    "Skipping device %s (addr: %s) - not a light type",
+                    device_info.get("device_name"),
+                    device_addr,
+                )
+                continue
 
-        # Create entity
-        entity = HafeleLightEntity(coordinator, device_addr, device_info, mqtt_client, topic_prefix)
-        entities.append(entity)
+            _LOGGER.info(
+                "Creating light entity for device: %s (addr: %s)",
+                device_info.get("device_name"),
+                device_addr,
+            )
 
-    async_add_entities(entities)
+            # Create coordinator for polling
+            coordinator = HafeleLightCoordinator(
+                hass,
+                mqtt_client,
+                device_addr,
+                topic_prefix,
+                polling_interval,
+                polling_timeout,
+            )
+
+            # Set up subscriptions
+            await coordinator._async_setup_subscriptions()
+
+            # Create entity
+            entity = HafeleLightEntity(
+                coordinator, device_addr, device_info, mqtt_client, topic_prefix
+            )
+            new_entities.append(entity)
+            created_entities.add(device_addr)
+
+        if new_entities:
+            _LOGGER.info("Adding %d new light entities", len(new_entities))
+            async_add_entities(new_entities)
+
+    @callback
+    def _on_devices_updated(event) -> None:
+        """Handle device discovery update event."""
+        hass.async_create_task(_create_entities_for_devices())
+
+    # Listen for device discovery updates
+    entry.async_on_unload(
+        hass.bus.async_listen(EVENT_DEVICES_UPDATED, _on_devices_updated)
+    )
+
+    # Create entities for any devices already discovered
+    await _create_entities_for_devices()
 
 
 class HafeleLightEntity(CoordinatorEntity, LightEntity):
