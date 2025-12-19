@@ -5,7 +5,6 @@ import json
 import logging
 from datetime import timedelta
 from typing import Any
-from urllib.parse import quote
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -24,10 +23,11 @@ from homeassistant.helpers.update_coordinator import (
 from .const import (
     DOMAIN,
     EVENT_DEVICES_UPDATED,
-    TOPIC_DEVICE_GET,
-    TOPIC_DEVICE_RESPONSE,
-    TOPIC_DEVICE_SET,
-    TOPIC_DEVICE_STATUS,
+    TOPIC_GET_DEVICE_LIGHTNESS,
+    TOPIC_GET_DEVICE_POWER,
+    TOPIC_LIGHT_STATUS,
+    TOPIC_SET_DEVICE_LIGHTNESS,
+    TOPIC_SET_DEVICE_POWER,
 )
 from .discovery import HafeleDiscovery
 from .mqtt_client import HafeleMQTTClient
@@ -58,29 +58,19 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         self._status_received = False
         self._unsubscribers: list = []
 
-        # URL encode device name for MQTT topic (handles spaces and special chars)
-        encoded_device_name = quote(device_name, safe="")
-
-        # Set up response topic subscription
-        status_topic = TOPIC_DEVICE_STATUS.format(
-            prefix=topic_prefix, device_name=encoded_device_name
-        )
-        # Also try response topic for compatibility
-        response_topic = TOPIC_DEVICE_RESPONSE.format(
-            prefix=topic_prefix, device_name=encoded_device_name
-        )
+        # Subscribe to the lightStatus topic (operation-based, not device-based)
+        # We'll filter messages by device_name in the payload
+        status_topic = TOPIC_LIGHT_STATUS.format(prefix=topic_prefix)
 
         _LOGGER.debug(
-            "Setting up topics for device %s (name: %s, encoded: %s): status=%s, response=%s",
+            "Setting up status subscription for device %s (name: %s) on topic: %s",
             device_addr,
             device_name,
-            encoded_device_name,
             status_topic,
-            response_topic,
         )
 
-        # Try both possible response topics
-        self.response_topics = [status_topic, response_topic]
+        # Single status topic - we filter by device_name in the message handler
+        self.response_topics = [status_topic]
 
         super().__init__(
             hass,
@@ -115,15 +105,24 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
             else:
                 data = payload
 
+            # Filter by device_name - only process messages for this device
+            message_device_name = data.get("device_name")
+            if message_device_name != self.device_name:
+                # Not for this device, ignore
+                return
+
             self._status_data = data
             self._status_received = True
             _LOGGER.debug(
-                "Received status for device %s: %s", self.device_addr, data
+                "Received status for device %s (name: %s): %s",
+                self.device_addr,
+                self.device_name,
+                data,
             )
             # Notify coordinator that data is available
             self.async_set_updated_data(data)
 
-        except (json.JSONDecodeError, TypeError) as err:
+        except (json.JSONDecodeError, TypeError, AttributeError) as err:
             _LOGGER.error(
                 "Error parsing status message for device %s: %s",
                 self.device_addr,
@@ -134,27 +133,30 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         """Fetch status from device via MQTT polling."""
         import asyncio
 
-        # URL encode device name for MQTT topic
-        encoded_device_name = quote(self.device_name, safe="")
-
-        # Request status
-        get_topic = TOPIC_DEVICE_GET.format(
-            prefix=self.topic_prefix, device_name=encoded_device_name
-        )
+        # Request status using operation-based topic
+        # Try both getDevicePower and getDeviceLightness to get full status
+        get_power_topic = TOPIC_GET_DEVICE_POWER.format(prefix=self.topic_prefix)
+        get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(prefix=self.topic_prefix)
+        
+        # Payload contains device_name per API docs
+        payload = {"device_name": self.device_name}
 
         _LOGGER.debug(
-            "Requesting status for device %s (name: %s) on topic: %s",
+            "Requesting status for device %s (name: %s) on topics: %s, %s with payload: %s",
             self.device_addr,
             self.device_name,
-            get_topic,
+            get_power_topic,
+            get_lightness_topic,
+            payload,
         )
 
         # Reset status received flag
         self._status_received = False
         old_data = self._status_data.copy()
-
-        # Publish status request
-        await self.mqtt_client.async_publish(get_topic, "", qos=1)
+        
+        # Request both power and lightness status
+        await self.mqtt_client.async_publish(get_power_topic, payload, qos=1)
+        await self.mqtt_client.async_publish(get_lightness_topic, payload, qos=1)
 
         # Wait for response (with timeout)
         timeout = self.polling_timeout
@@ -282,9 +284,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         self._attr_color_mode = ColorMode.BRIGHTNESS
 
-        # Store encoded device name for MQTT topics (URL encode to handle spaces)
-        device_name = device_info.get("device_name", f"device_{device_addr}")
-        self._encoded_device_name = quote(device_name, safe="")
+        # Device name is used in payloads, not topics (no encoding needed)
+        self._device_name = device_info.get("device_name", f"device_{device_addr}")
 
         # Device info
         location = device_info.get("location", "Unknown")
@@ -347,20 +348,33 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        set_topic = TOPIC_DEVICE_SET.format(
-            prefix=self.topic_prefix, device_name=self._encoded_device_name
-        )
+        # Use operation-based topic with device_name in payload
+        set_topic = TOPIC_SET_DEVICE_POWER.format(prefix=self.topic_prefix)
 
-        # Build command payload
-        command: dict[str, Any] = {"power": "on"}
+        # Build command payload with device_name per API docs
+        command: dict[str, Any] = {
+            "device_name": self.device_info.get("device_name"),
+            "power": "on",
+        }
 
-        # Add brightness if specified
+        # Add brightness if specified - use setDeviceLightness for brightness
         if ATTR_BRIGHTNESS in kwargs:
             brightness = kwargs[ATTR_BRIGHTNESS]
-            # Convert to 0-100 scale if API expects that
-            command["brightness"] = int((brightness / 255) * 100)
-
-        await self.mqtt_client.async_publish(set_topic, command, qos=1)
+            # Convert to 0-1 scale (API uses 0-1 for lightness)
+            lightness_value = brightness / 255.0
+            
+            # Set power first, then lightness
+            await self.mqtt_client.async_publish(set_topic, command, qos=1)
+            
+            # Set brightness using setDeviceLightness
+            lightness_topic = TOPIC_SET_DEVICE_LIGHTNESS.format(prefix=self.topic_prefix)
+            lightness_command = {
+                "device_name": self.device_info.get("device_name"),
+                "lightness": lightness_value,
+            }
+            await self.mqtt_client.async_publish(lightness_topic, lightness_command, qos=1)
+        else:
+            await self.mqtt_client.async_publish(set_topic, command, qos=1)
 
         # Optimistically update state
         if self.coordinator.data:
@@ -375,11 +389,13 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        set_topic = TOPIC_DEVICE_SET.format(
-            prefix=self.topic_prefix, device_name=self._encoded_device_name
-        )
+        # Use operation-based topic with device_name in payload
+        set_topic = TOPIC_SET_DEVICE_POWER.format(prefix=self.topic_prefix)
 
-        command = {"power": "off"}
+        command = {
+            "device_name": self.device_info.get("device_name"),
+            "power": "off",
+        }
 
         await self.mqtt_client.async_publish(set_topic, command, qos=1)
 

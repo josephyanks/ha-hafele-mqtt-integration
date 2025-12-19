@@ -20,15 +20,19 @@ TOPIC_DISCOVERY_LIGHTS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_LIGHTS}"
 TOPIC_DISCOVERY_GROUPS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_GROUPS}"
 TOPIC_DISCOVERY_SCENES = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_SCENES}"
 
-# Control topics (published) - using device_name per API docs
-TOPIC_DEVICE_SET = "{prefix}/lights/{device_name}/set"
-TOPIC_DEVICE_GET = "{prefix}/lights/{device_name}/get"
-TOPIC_GROUP_SET = "{prefix}/groups/{group_name}/set"
-TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"
+# Control topics (published) - operation-specific topics per API docs
+# Device name is in the payload, not the topic path
+TOPIC_GET_DEVICE_POWER = "{prefix}/getDevicePower"
+TOPIC_SET_DEVICE_POWER = "{prefix}/setDevicePower"
+TOPIC_SET_DEVICE_LIGHTNESS = "{prefix}/setDeviceLightness"
+TOPIC_GET_DEVICE_LIGHTNESS = "{prefix}/getDeviceLightness"
+TOPIC_SET_GROUP_POWER = "{prefix}/setGroupPower"
+TOPIC_GET_GROUP_POWER = "{prefix}/getGroupPower"
+TOPIC_RECALL_SCENE = "{prefix}/recallScene"
 
-# Status topics (subscribed) - using device_name per API docs
-TOPIC_DEVICE_STATUS = "{prefix}/lights/{device_name}/status"
-TOPIC_DEVICE_RESPONSE = "{prefix}/lights/{device_name}/response"
+# Status topics (subscribed) - operation-specific topics per API docs
+TOPIC_LIGHT_STATUS = "{prefix}/lightStatus"
+TOPIC_GROUP_STATUS = "{prefix}/groupStatus"
 
 # Configuration keys
 CONF_TOPIC_PREFIX = "topic_prefix"
