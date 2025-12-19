@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hafele Local MQTT",
+        "description": "Configure your Hafele Local MQTT integration",
+        "data": {
+          "topic_prefix": "MQTT Topic Prefix",
+          "polling_interval": "Polling Interval (seconds)",
+          "polling_timeout": "Polling Timeout (seconds)",
+          "enable_groups": "Enable Group Entities",
+          "enable_scenes": "Enable Scene Entities"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to MQTT broker",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Hafele Local MQTT is already configured"
+    }
+  }
+}
+
