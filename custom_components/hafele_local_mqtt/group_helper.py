@@ -5,10 +5,8 @@ import logging
 from typing import Any
 
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
-from homeassistant.components.light.group import LightGroup
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity_platform import EntityPlatform
 
 from .const import DOMAIN, EVENT_DEVICES_UPDATED
 from .discovery import HafeleDiscovery
@@ -122,45 +120,42 @@ async def create_ha_groups_for_hafele_groups(
             len(device_entity_ids),
         )
         
-        # Create a proper light group entity using the light.group platform
+        # Create a light group helper using the helper system
+        # Since LightGroup import fails, we'll use the helper storage system
+        # Note: This creates the helper data but may require HA restart or reload
         try:
-            # Register the entity in the registry first
-            # Light groups created via helpers use "group" as the platform domain
-            entity_entry = entity_registry.async_get_or_create(
-                LIGHT_DOMAIN,
-                GROUP_DOMAIN,  # Use "group" as the platform for light groups
-                unique_id,
-                suggested_object_id=entity_id_base,
-                name=ha_group_name,
-            )
+            from homeassistant.helpers import storage
             
-            # Create the LightGroup entity
-            # LightGroup(name, entity_ids, mode=None, unique_id=None)
-            light_group = LightGroup(
-                ha_group_name,
-                device_entity_ids,
-                mode=None,  # Use default mode (all_on)
-                unique_id=unique_id,
-            )
+            # Get helper storage
+            helper_storage = storage.Store(hass, 1, "helpers")
+            helpers_data = await helper_storage.async_load() or {}
             
-            # Set up the entity
-            light_group.hass = hass
-            light_group.entity_id = entity_entry.entity_id
+            # Create helper ID (must be unique)
+            helper_id = f"{DOMAIN}_{group_addr}_light_group"
             
-            # Get the light component and add the entity
-            from homeassistant.helpers.entity_component import EntityComponent
-            
-            if LIGHT_DOMAIN not in hass.data:
-                _LOGGER.warning("Light component not initialized, cannot create light group")
+            # Check if helper already exists
+            if helper_id in helpers_data:
+                _LOGGER.debug("Light group helper '%s' already exists in storage", ha_group_name)
                 continue
             
-            light_component: EntityComponent = hass.data[LIGHT_DOMAIN]
+            # Create helper entry for light group
+            helpers_data[helper_id] = {
+                "id": helper_id,
+                "name": ha_group_name,
+                "type": "light_group",
+                "entities": device_entity_ids,
+                "all": None,  # Use default mode (all_on)
+            }
             
-            # Add the entity to the light component
-            # This will properly register it as a light group
-            await light_component.async_add_entities([light_group], update_before_add=False)
+            # Save helpers data
+            await helper_storage.async_save(helpers_data)
             
-            _LOGGER.info("Created light group '%s' (entity_id: %s)", ha_group_name, entity_entry.entity_id)
+            _LOGGER.info(
+                "Created light group helper '%s' in storage (id: %s). "
+                "Note: You may need to restart Home Assistant for the light group to appear.",
+                ha_group_name,
+                helper_id,
+            )
             
         except Exception as err:
             _LOGGER.error(

@@ -48,6 +48,27 @@ async def async_setup_entry(
         for device_addr, device_info in devices.items():
             device_name = device_info.get("device_name", f"device_{device_addr}")
             
+            # Only create buttons for light devices
+            # Check device_types to ensure this is a light (not a switch, etc.)
+            device_types = device_info.get("device_types", [])
+            # device_types can contain: "light", "multiwhite", "rgb" (case may vary)
+            # If device_types exists, check if it contains any light-related type
+            if device_types:
+                # Check if this is a light type device (case-insensitive check)
+                device_types_lower = [dt.lower() for dt in device_types if isinstance(dt, str)]
+                is_light_device = any(
+                    dtype in ["light", "multiwhite", "rgb"] 
+                    for dtype in device_types_lower
+                )
+                if not is_light_device:
+                    _LOGGER.debug(
+                        "Skipping button creation for device %s (addr: %s) - not a light type (types: %s)",
+                        device_name,
+                        device_addr,
+                        device_types,
+                    )
+                    continue
+            
             # Create "Ping lightness" button
             lightness_button_id = (device_addr, "lightness")
             if lightness_button_id not in created_entities:
