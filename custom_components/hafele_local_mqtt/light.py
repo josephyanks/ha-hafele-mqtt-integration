@@ -222,19 +222,10 @@ async def async_setup_entry(
                 continue
             
             # Check if entity already exists in Home Assistant's entity registry
-            # Check both new and old unique_id formats for migration compatibility
-            new_unique_id = f"hafele_mqtt_{device_addr}"
-            old_unique_id = f"hafele_light_{device_addr}"
-            
+            unique_id = f"hafele_light_{device_addr}"
             existing_entity_id = entity_registry.async_get_entity_id(
-                "light", DOMAIN, new_unique_id
+                "light", DOMAIN, unique_id
             )
-            if not existing_entity_id:
-                # Also check for old format (migration case)
-                existing_entity_id = entity_registry.async_get_entity_id(
-                    "light", DOMAIN, old_unique_id
-                )
-            
             if existing_entity_id:
                 _LOGGER.debug(
                     "Entity already exists for device %s (addr: %s, entity_id: %s), skipping",
@@ -328,7 +319,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         self.device_info = device_info
         self.mqtt_client = mqtt_client
         self.topic_prefix = topic_prefix
-        self._attr_unique_id = f"hafele_mqtt_{device_addr}"
+        self._attr_unique_id = f"hafele_light_{device_addr}"
         self._attr_name = device_info.get("device_name", f"Hafele Light {device_addr}")
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         self._attr_color_mode = ColorMode.BRIGHTNESS
