@@ -542,36 +542,49 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             )
             lightness_command = {"lightness": lightness_value}
             await self.mqtt_client.async_publish(lightness_topic, lightness_command, qos=1)
-        else:
-            await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
-
-        # Optimistically update state
-        if self.coordinator.data:
-            self.coordinator.data.update({"onoff": 1})
-        else:
-            self.coordinator.data = {"onoff": 1}
-
-        self.async_write_ha_state()
-
-        # Request updated status after a short delay
-        # This ensures the set command has been processed before requesting status
-        async def _refresh_status() -> None:
-            await asyncio.sleep(0.2)  # 200ms delay
-            # Request power status after turning on
-            # Don't request lightness if we just set it, as we might get intermediate ramping values
-            get_power_topic = TOPIC_GET_DEVICE_POWER.format(
-                prefix=self.topic_prefix, device_name=self._device_name
-            )
-            await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
-            # Only request lightness if we didn't just set it
-            if ATTR_BRIGHTNESS not in kwargs:
+            
+            # Optimistically update state with both power and lightness values we just set
+            if self.coordinator.data:
+                self.coordinator.data.update({"onoff": 1, "lightness": lightness_value})
+            else:
+                self.coordinator.data = {"onoff": 1, "lightness": lightness_value}
+            
+            # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
+            async def _request_lightness_after_ramp() -> None:
+                await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
                 get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
                     prefix=self.topic_prefix, device_name=self._device_name
                 )
                 await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-        
-        hass = self.coordinator.hass
-        hass.async_create_task(_refresh_status())
+            
+            hass = self.coordinator.hass
+            hass.async_create_task(_request_lightness_after_ramp())
+        else:
+            await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
+            
+            # Optimistically update state with power value we just set
+            if self.coordinator.data:
+                self.coordinator.data.update({"onoff": 1})
+            else:
+                self.coordinator.data = {"onoff": 1}
+            
+            # Schedule a powerGet request 5 seconds after setting to get final value after ramping
+            async def _request_power_after_ramp() -> None:
+                await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
+                get_power_topic = TOPIC_GET_DEVICE_POWER.format(
+                    prefix=self.topic_prefix, device_name=self._device_name
+                )
+                await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
+                # Also request lightness status
+                get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                    prefix=self.topic_prefix, device_name=self._device_name
+                )
+                await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+            
+            hass = self.coordinator.hass
+            hass.async_create_task(_request_power_after_ramp())
+
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
@@ -585,7 +598,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
 
-        # Optimistically update state
+        # Optimistically update state with power value we just set
         if self.coordinator.data:
             self.coordinator.data.update({"onoff": 0})
         else:
@@ -593,15 +606,14 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         self.async_write_ha_state()
 
-        # Request updated status after a short delay
-        # This ensures the set command has been processed before requesting status
-        async def _refresh_status() -> None:
-            await asyncio.sleep(0.2)  # 200ms delay
+        # Schedule a powerGet request 5 seconds after setting to get final value after ramping
+        async def _request_power_after_ramp() -> None:
+            await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
             get_power_topic = TOPIC_GET_DEVICE_POWER.format(
                 prefix=self.topic_prefix, device_name=self._device_name
             )
             await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
         
         hass = self.coordinator.hass
-        hass.async_create_task(_refresh_status())
+        hass.async_create_task(_request_power_after_ramp())
 
