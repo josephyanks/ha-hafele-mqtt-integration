@@ -205,6 +205,9 @@ async def async_setup_entry(
     # Track which entities we've already created in this session
     created_entities: set[int] = set()
     
+    # Track coordinators for startup status requests
+    coordinators: dict[int, HafeleLightCoordinator] = {}
+    
     # Get entity registry to check for existing entities
     entity_registry = er.async_get(hass)
 
@@ -269,6 +272,9 @@ async def async_setup_entry(
             # Set up subscriptions to device status topic
             await coordinator._async_setup_subscriptions()
             
+            # Store coordinator reference for startup status tracking
+            coordinators[device_addr] = coordinator
+            
             # Start individual coordinator polling
             # Use async_request_refresh instead of async_config_entry_first_refresh
             # since we don't have a config entry reference in the coordinator
@@ -315,15 +321,62 @@ async def async_setup_entry(
                 break
         
         if tos_group_name:
-            _LOGGER.info("Requesting status for all devices via TOS_Internal_All group")
-            power_get_topic = TOPIC_GET_GROUP_POWER.format(
-                prefix=topic_prefix, group_name=tos_group_name
-            )
-            lightness_get_topic = TOPIC_GET_GROUP_LIGHTNESS.format(
-                prefix=topic_prefix, group_name=tos_group_name
-            )
-            await mqtt_client.async_publish(power_get_topic, {}, qos=1)
-            await mqtt_client.async_publish(lightness_get_topic, {}, qos=1)
+            # Get list of devices to track responses
+            devices = discovery.get_all_devices()
+            device_count = len(devices)
+            
+            if device_count > 0:
+                _LOGGER.info(
+                    "Requesting power status for all %d devices via TOS_Internal_All group",
+                    device_count
+                )
+                power_get_topic = TOPIC_GET_GROUP_POWER.format(
+                    prefix=topic_prefix, group_name=tos_group_name
+                )
+                await mqtt_client.async_publish(power_get_topic, {}, qos=1)
+                
+                # Wait for power responses from all devices
+                # Check which coordinators have received power status (have "onoff" field)
+                max_wait_time = 5.0  # Maximum wait time in seconds
+                check_interval = 0.2  # Check every 200ms
+                elapsed = 0.0
+                devices_with_power = set()
+                
+                _LOGGER.debug("Waiting for power status responses from all devices...")
+                while elapsed < max_wait_time:
+                    # Check which devices have received power status
+                    for device_addr, coordinator in coordinators.items():
+                        status_data = coordinator._status_data
+                        if isinstance(status_data, dict) and "onoff" in status_data:
+                            devices_with_power.add(device_addr)
+                    
+                    # If all devices have responded, break early
+                    if len(devices_with_power) >= device_count:
+                        _LOGGER.debug(
+                            "Received power status from all %d devices",
+                            len(devices_with_power)
+                        )
+                        break
+                    
+                    await asyncio.sleep(check_interval)
+                    elapsed += check_interval
+                
+                if len(devices_with_power) < device_count:
+                    _LOGGER.debug(
+                        "Received power status from %d/%d devices after %.1f seconds",
+                        len(devices_with_power),
+                        device_count,
+                        elapsed,
+                    )
+                
+                # Now request lightness status
+                _LOGGER.info("Requesting lightness status for all devices via TOS_Internal_All group")
+                lightness_get_topic = TOPIC_GET_GROUP_LIGHTNESS.format(
+                    prefix=topic_prefix, group_name=tos_group_name
+                )
+                await mqtt_client.async_publish(lightness_get_topic, {}, qos=1)
+            else:
+                _LOGGER.debug("No devices discovered yet, skipping group status request")
         else:
             _LOGGER.debug("TOS_Internal_All group not found, skipping group status request")
     
