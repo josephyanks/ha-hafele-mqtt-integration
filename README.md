@@ -71,7 +71,7 @@ ha-hafele-mqtt-integration/
 The integration will guide you through setup via the config flow. You can configure:
 
 - MQTT topic prefix (default: `hafele`)
-- Polling interval (default: 30 seconds)
+- Polling interval (default: 60 seconds)
 - Polling timeout (default: 5 seconds)
 - Enable/disable group entities
 - Enable/disable scene entities

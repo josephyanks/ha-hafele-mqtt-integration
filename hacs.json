@@ -3,5 +3,6 @@
     "country": "US",
     "homeassistant": "2024.5.5",
     "hide_default_branch": true,
-    "render_readme": true
+    "render_readme": true,
+    "icon": "logo.png"
 }

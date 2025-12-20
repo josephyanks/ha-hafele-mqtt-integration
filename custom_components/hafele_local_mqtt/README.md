@@ -56,7 +56,7 @@ The integration subscribes to:
 ## Polling
 
 Since Hafele devices don't automatically publish state updates, the integration uses a polling mechanism:
-- Default polling interval: 30 seconds
+- Default polling interval: 60 seconds
 - Default polling timeout: 5 seconds
 - Configurable in the integration settings
 

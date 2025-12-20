@@ -22,7 +22,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Get configuration
     topic_prefix = entry.data.get("topic_prefix", "hafele")
-    polling_interval = entry.data.get("polling_interval", 30)
+    polling_interval = entry.data.get("polling_interval", 60)
     polling_timeout = entry.data.get("polling_timeout", 5)
     
     # Get MQTT broker configuration
