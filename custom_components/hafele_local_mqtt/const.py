@@ -24,12 +24,16 @@ TOPIC_DISCOVERY_GROUPS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_GROUPS}"  # {gateway_to
 TOPIC_DISCOVERY_SCENES = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_SCENES}"  # {gateway_topic}/scenes
 
 # Control topics (SEND - Publish)
-# API: SEND setDevicePower, setDeviceLightness, setGroupPower, recallScene
-# Format: {gateway_topic}/lights/{device_name}/{operation}
-TOPIC_DEVICE_POWER = "{prefix}/lights/{device_name}/power"  # setDevicePower / getDevicePower
-TOPIC_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightness"  # setDeviceLightness / getDeviceLightness
-TOPIC_GROUP_POWER = "{prefix}/groups/{group_name}/power"  # setGroupPower / getGroupPower
-TOPIC_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # setGroupLightness / getGroupLightness
+# API: SEND setDevicePower, getDevicePower, setDeviceLightness, getDeviceLightness, etc.
+# Format: {gateway_topic}/lights/{device_name}/{operation_name}
+TOPIC_SET_DEVICE_POWER = "{prefix}/lights/{device_name}/setDevicePower"
+TOPIC_GET_DEVICE_POWER = "{prefix}/lights/{device_name}/getDevicePower"
+TOPIC_SET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/setDeviceLightness"
+TOPIC_GET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/getDeviceLightness"
+TOPIC_SET_GROUP_POWER = "{prefix}/groups/{group_name}/setGroupPower"
+TOPIC_GET_GROUP_POWER = "{prefix}/groups/{group_name}/getGroupPower"
+TOPIC_SET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/setGroupLightness"
+TOPIC_GET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/getGroupLightness"
 TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"  # recallScene
 
 # Status topics (RECEIVE - Subscribe)

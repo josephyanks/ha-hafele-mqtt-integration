@@ -24,103 +24,16 @@ from homeassistant.helpers.update_coordinator import (
 from .const import (
     DOMAIN,
     EVENT_DEVICES_UPDATED,
-    TOPIC_DEVICE_LIGHTNESS,
-    TOPIC_DEVICE_POWER,
+    TOPIC_GET_DEVICE_LIGHTNESS,
+    TOPIC_GET_DEVICE_POWER,
+    TOPIC_SET_DEVICE_LIGHTNESS,
+    TOPIC_SET_DEVICE_POWER,
     TOPIC_DEVICE_STATUS,
-    TOPIC_GROUP_LIGHTNESS,
-    TOPIC_GROUP_POWER,
 )
 from .discovery import HafeleDiscovery
 from .mqtt_client import HafeleMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
-
-
-class HafeleGroupCoordinator(DataUpdateCoordinator):
-    """Shared coordinator for polling all devices via group status."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        mqtt_client: HafeleMQTTClient,
-        group_name: str,
-        topic_prefix: str,
-        polling_interval: int,
-        polling_timeout: int,
-    ) -> None:
-        """Initialize the group coordinator."""
-        self.mqtt_client = mqtt_client
-        self.group_name = group_name
-        self.topic_prefix = topic_prefix
-        self.polling_timeout = polling_timeout
-        self._device_status_data: dict[str, dict[str, Any]] = {}  # device_name -> status data
-        self._unsubscribers: list = []
-
-        # URL encode group name for MQTT topic
-        from urllib.parse import quote
-        self._encoded_group_name = quote(group_name, safe="")
-
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"hafele_group_{group_name}",
-            update_interval=timedelta(seconds=polling_interval),
-        )
-
-    async def _async_setup_subscriptions(self) -> None:
-        """Set up MQTT subscriptions for device status responses."""
-        # Subscribe to all device status topics using wildcard pattern
-        # Note: We'll subscribe to individual device topics as devices are discovered
-        # For now, this is a placeholder - actual subscriptions happen per device
-        pass
-
-    def subscribe_to_device_status(self, device_name: str, callback: Callable) -> None:
-        """Subscribe to a device's status topic and route messages to the callback."""
-        from urllib.parse import quote
-        encoded_device_name = quote(device_name, safe="")
-        status_topic = TOPIC_DEVICE_STATUS.format(
-            prefix=self.topic_prefix, device_name=encoded_device_name
-        )
-        # The callback will be set up by the individual coordinators
-        # This is just for tracking
-        _LOGGER.debug("Group coordinator tracking device: %s", device_name)
-
-    async def _async_shutdown(self) -> None:
-        """Clean up subscriptions."""
-        for unsub in self._unsubscribers:
-            if callable(unsub):
-                unsub()
-        self._unsubscribers.clear()
-        await super()._async_shutdown()
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Poll group status to trigger device status updates."""
-        import asyncio
-
-        # Request status using getGroupPower and getGroupLightness
-        # This will trigger status updates for all devices in the group
-        get_power_topic = TOPIC_GROUP_POWER.format(
-            prefix=self.topic_prefix, group_name=self._encoded_group_name
-        )
-        get_lightness_topic = TOPIC_GROUP_LIGHTNESS.format(
-            prefix=self.topic_prefix, group_name=self._encoded_group_name
-        )
-
-        _LOGGER.debug(
-            "Polling group %s status on topics: %s, %s",
-            self.group_name,
-            get_power_topic,
-            get_lightness_topic,
-        )
-
-        # Request both power and lightness status for the group
-        # This triggers individual device status updates
-        await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
-        await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-
-        # Group polling doesn't wait for responses - individual devices receive their own status
-        # Return empty dict as this coordinator doesn't hold device-specific data
-        return {}
 
 
 class HafeleLightCoordinator(DataUpdateCoordinator):
@@ -231,9 +144,50 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch status from device via MQTT polling."""
-        # When using group polling, individual coordinators don't poll
-        # Status updates come from group polling triggering device status messages
-        # Return current status data
+        import asyncio
+
+        # Request status using getDevicePower and getDeviceLightness operations
+        get_power_topic = TOPIC_GET_DEVICE_POWER.format(
+            prefix=self.topic_prefix, device_name=self._encoded_device_name
+        )
+        get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+            prefix=self.topic_prefix, device_name=self._encoded_device_name
+        )
+
+        _LOGGER.debug(
+            "Requesting status for device %s (name: %s) on topics: %s, %s",
+            self.device_addr,
+            self.device_name,
+            get_power_topic,
+            get_lightness_topic,
+        )
+
+        # Reset status received flag
+        self._status_received = False
+        # Keep a copy of existing data to preserve it if no response comes
+        old_data = self._status_data.copy() if isinstance(self._status_data, dict) else {}
+
+        # Request both power and lightness status
+        await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
+        await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+
+        # Wait for response (with timeout)
+        # Note: We wait for at least one status update, which may contain partial data
+        timeout = self.polling_timeout
+        elapsed = 0
+        while not self._status_received and elapsed < timeout:
+            await asyncio.sleep(0.1)
+            elapsed += 0.1
+
+        if not self._status_received:
+            _LOGGER.warning(
+                "Timeout waiting for status response from device %s",
+                self.device_addr,
+            )
+            # Return existing data (preserves all fields even if no new update)
+            return old_data if old_data else {}
+
+        # Return merged status data (includes both old and new fields)
         return self._status_data if isinstance(self._status_data, dict) else {}
 
 
@@ -249,47 +203,6 @@ async def async_setup_entry(
     topic_prefix = data["topic_prefix"]
     polling_interval = data["polling_interval"]
     polling_timeout = data["polling_timeout"]
-
-    # Function to find and setup group coordinator
-    async def _setup_group_coordinator() -> HafeleGroupCoordinator | None:
-        """Find and setup the TOS_Internal_All group coordinator."""
-        # Wait a bit for groups to be discovered
-        import asyncio
-        max_wait = 10  # Wait up to 10 seconds
-        waited = 0
-        while waited < max_wait:
-            all_groups = discovery.get_all_groups()
-            for group_addr, group_info in all_groups.items():
-                group_name = group_info.get("group_name", "")
-                if group_name == "TOS_Internal_All":
-                    _LOGGER.info("Found TOS_Internal_All group, using group-based polling")
-                    group_coord = HafeleGroupCoordinator(
-                        hass,
-                        mqtt_client,
-                        group_name,
-                        topic_prefix,
-                        polling_interval,
-                        polling_timeout,
-                    )
-                    await group_coord._async_setup_subscriptions()
-                    # Start the coordinator by requesting first refresh
-                    await group_coord.async_request_refresh()
-                    return group_coord
-            
-            # Group not found yet, wait a bit
-            if waited < max_wait:
-                _LOGGER.debug("Waiting for TOS_Internal_All group discovery...")
-                await asyncio.sleep(0.5)
-                waited += 0.5
-        
-        _LOGGER.warning(
-            "TOS_Internal_All group not found after %d seconds, falling back to individual device polling",
-            max_wait,
-        )
-        return None
-
-    # Try to setup group coordinator
-    group_coordinator_ref: HafeleGroupCoordinator | None = await _setup_group_coordinator()
 
     # Track which entities we've already created
     created_entities: set[int] = set()
@@ -325,7 +238,7 @@ async def async_setup_entry(
             # Get device name for topic construction
             device_name = device_info.get("device_name", f"device_{device_addr}")
 
-            # Create coordinator for this device (subscribes to status, but doesn't poll if group polling is active)
+            # Create coordinator for this device
             coordinator = HafeleLightCoordinator(
                 hass,
                 mqtt_client,
@@ -339,13 +252,10 @@ async def async_setup_entry(
             # Set up subscriptions to device status topic
             await coordinator._async_setup_subscriptions()
             
-            # If using group polling, don't start individual coordinator polling
-            # Status updates will come from group polling
-            if not group_coordinator_ref:
-                # Only start individual polling if group polling is not available
-                # Use async_request_refresh instead of async_config_entry_first_refresh
-                # since we don't have a config entry reference in the coordinator
-                await coordinator.async_request_refresh()
+            # Start individual coordinator polling
+            # Use async_request_refresh instead of async_config_entry_first_refresh
+            # since we don't have a config entry reference in the coordinator
+            await coordinator.async_request_refresh()
 
             # Create entity
             entity = HafeleLightEntity(
@@ -361,42 +271,7 @@ async def async_setup_entry(
     @callback
     def _on_devices_updated(event) -> None:
         """Handle device discovery update event."""
-        nonlocal group_coordinator_ref
-        
-        # Check if groups were just discovered and we need to setup group coordinator
-        if not group_coordinator_ref:
-            all_groups = discovery.get_all_groups()
-            for group_addr, group_info in all_groups.items():
-                group_name = group_info.get("group_name", "")
-                if group_name == "TOS_Internal_All":
-                    _LOGGER.info("Found TOS_Internal_All group after discovery update, setting up group-based polling")
-                    hass.async_create_task(_setup_group_coordinator_later())
-                    break
-        
         hass.async_create_task(_create_entities_for_devices())
-    
-    async def _setup_group_coordinator_later() -> None:
-        """Setup group coordinator after groups are discovered."""
-        nonlocal group_coordinator_ref
-        if group_coordinator_ref:
-            return  # Already set up
-        
-        all_groups = discovery.get_all_groups()
-        for group_addr, group_info in all_groups.items():
-            group_name = group_info.get("group_name", "")
-            if group_name == "TOS_Internal_All":
-                _LOGGER.info("Setting up TOS_Internal_All group coordinator")
-                group_coordinator_ref = HafeleGroupCoordinator(
-                    hass,
-                    mqtt_client,
-                    group_name,
-                    topic_prefix,
-                    polling_interval,
-                    polling_timeout,
-                )
-                await group_coordinator_ref._async_setup_subscriptions()
-                await group_coordinator_ref.async_request_refresh()
-                break
 
     # Listen for device discovery updates
     entry.async_on_unload(
@@ -517,8 +392,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        # Use device-specific topic: {gateway_topic}/lights/{device_name}/power
-        power_topic = TOPIC_DEVICE_POWER.format(
+        # Use device-specific topic: {gateway_topic}/lights/{device_name}/setDevicePower
+        power_topic = TOPIC_SET_DEVICE_POWER.format(
             prefix=self.topic_prefix, device_name=self._encoded_device_name
         )
 
@@ -535,7 +410,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             await self.mqtt_client.async_publish(power_topic, command, qos=1)
             
             # Then set brightness using device-specific lightness topic
-            lightness_topic = TOPIC_DEVICE_LIGHTNESS.format(
+            lightness_topic = TOPIC_SET_DEVICE_LIGHTNESS.format(
                 prefix=self.topic_prefix, device_name=self._encoded_device_name
             )
             lightness_command = {"lightness": lightness_value}
@@ -556,13 +431,13 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         async def _refresh_status() -> None:
             await asyncio.sleep(0.2)  # 200ms delay
             # Request power status
-            get_power_topic = TOPIC_DEVICE_POWER.format(
+            get_power_topic = TOPIC_GET_DEVICE_POWER.format(
                 prefix=self.topic_prefix, device_name=self._encoded_device_name
             )
             await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
             # If brightness was set, also request lightness status
             if ATTR_BRIGHTNESS in kwargs:
-                get_lightness_topic = TOPIC_DEVICE_LIGHTNESS.format(
+                get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
                     prefix=self.topic_prefix, device_name=self._encoded_device_name
                 )
                 await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
@@ -572,8 +447,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        # Use device-specific topic: {gateway_topic}/lights/{device_name}/power
-        power_topic = TOPIC_DEVICE_POWER.format(
+        # Use device-specific topic: {gateway_topic}/lights/{device_name}/setDevicePower
+        power_topic = TOPIC_SET_DEVICE_POWER.format(
             prefix=self.topic_prefix, device_name=self._encoded_device_name
         )
 
@@ -594,7 +469,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         # This ensures the set command has been processed before requesting status
         async def _refresh_status() -> None:
             await asyncio.sleep(0.2)  # 200ms delay
-            get_power_topic = TOPIC_DEVICE_POWER.format(
+            get_power_topic = TOPIC_GET_DEVICE_POWER.format(
                 prefix=self.topic_prefix, device_name=self._encoded_device_name
             )
             await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
