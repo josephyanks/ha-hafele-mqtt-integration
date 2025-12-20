@@ -328,6 +328,10 @@ async def async_setup_entry(
     # Create entities for any devices already discovered
     await _create_entities_for_devices()
     
+    # Also create group entities
+    from .group import async_setup_entry as async_setup_group_entry
+    await async_setup_group_entry(hass, entry, async_add_entities)
+    
     # On startup, request status for all devices via TOS_Internal_All group
     # This triggers status updates for all devices in the group
     async def _request_all_device_status() -> None:

@@ -42,7 +42,7 @@ TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"  # Operation ID: 
 # API: RECEIVE lightStatus, groupStatus
 # Format: {gateway_topic}/lights/{device_name}/status
 TOPIC_DEVICE_STATUS = "{prefix}/lights/{device_name}/status"  # lightStatus
-TOPIC_GROUP_STATUS = "{prefix}/groups/{group_name}/status"  # groupStatus
+TOPIC_GROUP_STATUS = "{prefix}/groups/{group_name}/status"  # groupStatus (Operation ID: groupStatus)
 
 # Configuration keys
 CONF_TOPIC_PREFIX = "topic_prefix"
