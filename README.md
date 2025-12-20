@@ -98,6 +98,8 @@ The integration uses the following MQTT topics:
 
 ## How It Works
 
+Uses the kind-of-public [Hafele MQTT api for connect mesh](https://help.connect-mesh.io/mqtt/)
+
 1. **Discovery**: The integration subscribes to MQTT discovery topics (`hafele/lights`, `hafele/groups`, `hafele/scenes`) to automatically discover your Hafele devices.
 
 2. **Status Polling**: Since Hafele devices don't automatically publish state updates, the integration uses a polling mechanism:

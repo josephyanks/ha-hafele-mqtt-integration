@@ -328,30 +328,13 @@ async def async_setup_entry(
     # Create entities for any devices already discovered
     await _create_entities_for_devices()
     
-    # Create HA helper groups for Hafele groups
+    # Create group light entities for Hafele groups
     enable_groups = entry.data.get("enable_groups", True)
     
     if enable_groups:
-        from .group_helper import create_ha_groups_for_hafele_groups
-        
-        async def _create_ha_groups() -> None:
-            """Create HA helper groups for Hafele groups."""
-            # Wait a bit for device entities to be created first
-            await asyncio.sleep(2.0)
-            await create_ha_groups_for_hafele_groups(hass, discovery)
-        
-        # Create HA groups after a delay to ensure device entities exist
-        hass.async_create_task(_create_ha_groups())
-        
-        # Also listen for device updates to recreate groups if needed
-        @callback
-        def _on_devices_updated_for_ha_groups(event) -> None:
-            """Handle device discovery update to recreate HA groups."""
-            hass.async_create_task(_create_ha_groups())
-        
-        entry.async_on_unload(
-            hass.bus.async_listen(EVENT_DEVICES_UPDATED, _on_devices_updated_for_ha_groups)
-        )
+        # Import and call the group light setup
+        from .group_light import async_setup_entry as async_setup_group_lights
+        await async_setup_group_lights(hass, entry, async_add_entities)
     
     # On startup, request status for all devices via TOS_Internal_All group
     # This triggers status updates for all devices in the group
