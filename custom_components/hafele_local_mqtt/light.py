@@ -430,17 +430,15 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         # This ensures the set command has been processed before requesting status
         async def _refresh_status() -> None:
             await asyncio.sleep(0.2)  # 200ms delay
-            # Request power status
+            # Always request both power and lightness status after turning on
             get_power_topic = TOPIC_GET_DEVICE_POWER.format(
                 prefix=self.topic_prefix, device_name=self._encoded_device_name
             )
+            get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                prefix=self.topic_prefix, device_name=self._encoded_device_name
+            )
             await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
-            # If brightness was set, also request lightness status
-            if ATTR_BRIGHTNESS in kwargs:
-                get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                    prefix=self.topic_prefix, device_name=self._encoded_device_name
-                )
-                await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+            await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
         
         hass = self.coordinator.hass
         hass.async_create_task(_refresh_status())
