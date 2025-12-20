@@ -20,49 +20,56 @@ async def create_ha_groups_for_hafele_groups(
     discovery: HafeleDiscovery,
 ) -> None:
     """Create Home Assistant helper groups for Hafele groups."""
-    from homeassistant.helpers import group as group_helper
-    
     groups = discovery.get_all_groups()
-    devices = discovery.get_all_devices()
     
     # Build mapping of group addresses to device entity IDs
-    # First, get all device entity IDs
+    # Use the "devices" field from the group discovery payload
+    # The "devices" field contains a list of device_addr integers
     entity_registry = er.async_get(hass)
-    all_device_entity_ids: list[str] = []
-    for device_addr in devices.keys():
-        unique_id = f"{device_addr}_mqtt"
-        entity_id = entity_registry.async_get_entity_id("light", DOMAIN, unique_id)
-        if entity_id:
-            all_device_entity_ids.append(entity_id)
-    
-    # Map groups to their device entity IDs
-    # Note: If groups have device information in their discovery payload, use that
-    # For now, we'll try to get devices from group_info, but fall back to all devices
     group_to_devices: dict[int, list[str]] = {}
+    
     for group_addr, group_info in groups.items():
-        # Try to get device addresses from group info (various possible field names)
-        device_addrs = (
-            group_info.get("devices", [])
-            or group_info.get("device_addrs", [])
-            or group_info.get("device_addresses", [])
-            or []
-        )
+        # Get device addresses from the "devices" field in the group discovery payload
+        device_addrs = group_info.get("devices", [])
         
+        if not device_addrs:
+            _LOGGER.debug(
+                "Group %s (addr: %s) has no devices field, skipping",
+                group_info.get("group_name"),
+                group_addr,
+            )
+            continue
+        
+        # Convert device addresses to entity IDs
         entity_ids = []
-        if device_addrs:
-            # Convert device addresses to entity IDs
-            for device_addr in device_addrs:
-                unique_id = f"{device_addr}_mqtt"
-                entity_id = entity_registry.async_get_entity_id("light", DOMAIN, unique_id)
-                if entity_id:
-                    entity_ids.append(entity_id)
-        
-        # If no specific devices found, use all devices (especially for TOS_Internal_All)
-        if not entity_ids and all_device_entity_ids:
-            entity_ids = all_device_entity_ids.copy()
+        for device_addr in device_addrs:
+            # Find the entity ID for this device using its unique_id
+            unique_id = f"{device_addr}_mqtt"
+            entity_id = entity_registry.async_get_entity_id("light", DOMAIN, unique_id)
+            if entity_id:
+                entity_ids.append(entity_id)
+            else:
+                _LOGGER.debug(
+                    "Device %s (addr: %s) not found in entity registry for group %s",
+                    device_addr,
+                    group_addr,
+                    group_info.get("group_name"),
+                )
         
         if entity_ids:
             group_to_devices[group_addr] = entity_ids
+            _LOGGER.debug(
+                "Group %s (addr: %s) mapped to %d device entities",
+                group_info.get("group_name"),
+                group_addr,
+                len(entity_ids),
+            )
+        else:
+            _LOGGER.warning(
+                "Group %s (addr: %s) has no valid device entities found",
+                group_info.get("group_name"),
+                group_addr,
+            )
     
     # Create HA groups for each Hafele group
     for group_addr, group_info in groups.items():
@@ -91,18 +98,36 @@ async def create_ha_groups_for_hafele_groups(
             )
             continue
         
-        # Check if group already exists
-        entity_registry = er.async_get(hass)
+        # Check if group already exists and update it if needed
         existing_entity_id = entity_registry.async_get_entity_id(
             "light", GROUP_DOMAIN, group_entity_id
         )
         
         if existing_entity_id:
             _LOGGER.debug(
-                "HA group %s already exists (entity_id: %s), skipping",
+                "HA group %s already exists (entity_id: %s), updating entities",
                 ha_group_name,
                 existing_entity_id,
             )
+            # Update the existing group's entities
+            try:
+                await hass.services.async_call(
+                    GROUP_DOMAIN,
+                    "set",
+                    {
+                        "object_id": entity_id_base,
+                        "name": ha_group_name,
+                        "entities": device_entity_ids,
+                        "icon": "mdi:lightbulb-group",
+                    },
+                )
+                _LOGGER.info("Updated HA helper group '%s'", ha_group_name)
+            except Exception as err:
+                _LOGGER.error(
+                    "Error updating HA helper group '%s': %s",
+                    ha_group_name,
+                    err,
+                )
             continue
         
         _LOGGER.info(
