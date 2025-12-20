@@ -119,22 +119,9 @@ async def async_setup_entry(
             
             # Link individual light entities to the group device
             # This makes them appear under the group device in Home Assistant
-            for device_addr in device_addrs:
-                device_unique_id = f"{device_addr}_mqtt"
-                light_entity_id = entity_registry.async_get_entity_id("light", DOMAIN, device_unique_id)
-                if light_entity_id:
-                    entity_entry = entity_registry.async_get(light_entity_id)
-                    if entity_entry and entity_entry.device_id != group_device.id:
-                        # Update the entity to link it to the group device
-                        entity_registry.async_update_entity(
-                            light_entity_id,
-                            device_id=group_device.id,
-                        )
-                        _LOGGER.debug(
-                            "Linked light entity %s to group device %s",
-                            light_entity_id,
-                            group_device.id,
-                        )
+            # We need to do this after entities are added to hass, so we'll do it in async_added_to_hass
+            entity._device_addrs_to_link = device_addrs
+            entity._group_device_id = group_device.id
 
         if new_entities:
             _LOGGER.info("Adding %d group light entities", len(new_entities))
@@ -182,6 +169,7 @@ class HafeleGroupLightEntity(LightEntity):
         light_entity_ids: list[str],
         group_device_id: str,
     ) -> None:
+        """Initialize the group light entity."""
         """Initialize the group light."""
         self.hass = hass
         self.group_addr = group_addr
@@ -191,6 +179,7 @@ class HafeleGroupLightEntity(LightEntity):
         self._attr_name = display_name
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         self._attr_color_mode = ColorMode.BRIGHTNESS
+        self._attr_available = True  # Mark entity as available
         
         # Device info - this creates a device that contains the individual lights
         self._attr_device_info = DeviceInfo(
@@ -210,6 +199,60 @@ class HafeleGroupLightEntity(LightEntity):
         """When entity is added to hass."""
         await super().async_added_to_hass()
         
+        # Link individual light entities to the group device
+        # This makes them appear under the group device in Home Assistant
+        # Schedule this to happen slightly after async_added_to_hass completes
+        # to ensure all entities are fully registered
+        async def _link_entities_to_group():
+            """Link individual light entities to the group device."""
+            # Small delay to ensure all entities are registered
+            await asyncio.sleep(0.1)
+            
+            if not (hasattr(self, "_device_addrs_to_link") and hasattr(self, "_group_device_id")):
+                return
+            
+            entity_registry = er.async_get(self.hass)
+            linked_count = 0
+            
+            for device_addr in self._device_addrs_to_link:
+                device_unique_id = f"{device_addr}_mqtt"
+                light_entity_id = entity_registry.async_get_entity_id("light", DOMAIN, device_unique_id)
+                if light_entity_id:
+                    entity_entry = entity_registry.async_get(light_entity_id)
+                    if entity_entry:
+                        # Update the entity to link it to the group device
+                        entity_registry.async_update_entity(
+                            light_entity_id,
+                            device_id=self._group_device_id,
+                        )
+                        linked_count += 1
+                        _LOGGER.debug(
+                            "Linked light entity %s to group device %s",
+                            light_entity_id,
+                            self._group_device_id,
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Light entity %s not found in registry for device %s",
+                            light_entity_id,
+                            device_addr,
+                        )
+                else:
+                    _LOGGER.debug(
+                        "Could not find entity ID for device %s (unique_id: %s)",
+                        device_addr,
+                        device_unique_id,
+                    )
+            
+            if linked_count > 0:
+                _LOGGER.info(
+                    "Linked %d light entities to group device %s",
+                    linked_count,
+                    self._group_device_id,
+                )
+        
+        self.hass.async_create_task(_link_entities_to_group())
+        
         # Subscribe to state changes of all child lights
         @callback
         def _async_state_changed_listener(entity_id: str, old_state: Any, new_state: Any) -> None:
@@ -221,7 +264,14 @@ class HafeleGroupLightEntity(LightEntity):
             self._light_states[entity_id] = {
                 "state": new_state.state,
                 "brightness": new_state.attributes.get("brightness"),
+                "available": new_state.state not in ("unavailable", "unknown"),
             }
+            
+            # Update availability - group is available if at least one light is available
+            self._attr_available = any(
+                state_data.get("available", True)
+                for state_data in self._light_states.values()
+            )
             
             # Update our aggregated state
             self.async_write_ha_state()
@@ -238,7 +288,21 @@ class HafeleGroupLightEntity(LightEntity):
                 self._light_states[entity_id] = {
                     "state": state.state,
                     "brightness": state.attributes.get("brightness"),
+                    "available": state.state not in ("unavailable", "unknown"),
                 }
+            else:
+                # Entity doesn't exist yet, mark as unavailable
+                self._light_states[entity_id] = {
+                    "state": "unavailable",
+                    "brightness": None,
+                    "available": False,
+                }
+        
+        # Update availability - group is available if at least one light is available
+        self._attr_available = any(
+            state_data.get("available", False)
+            for state_data in self._light_states.values()
+        ) if self._light_states else True
         
         # Write initial state
         self.async_write_ha_state()
