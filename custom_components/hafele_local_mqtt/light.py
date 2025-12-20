@@ -235,6 +235,8 @@ async def async_setup_entry(
                 )
                 # Mark as created so we don't try again
                 created_entities.add(device_addr)
+                # Also store coordinator if it exists for startup status tracking
+                # (coordinator might have been created in a previous call)
                 continue
 
             # Only create entities for lights
@@ -280,24 +282,6 @@ async def async_setup_entry(
             # since we don't have a config entry reference in the coordinator
             await coordinator.async_request_refresh()
 
-            # Generate entity_id from device name with "_mqtt" suffix
-            import re
-            device_name = device_info.get("device_name", f"device_{device_addr}")
-            # Generate entity_id from device name: lowercase, replace spaces with underscores
-            entity_id_base = device_name.lower().replace(" ", "_").replace("-", "_")
-            # Remove any special characters that aren't allowed in entity IDs
-            entity_id_base = re.sub(r"[^a-z0-9_]", "", entity_id_base)
-            suggested_object_id = f"{entity_id_base}_mqtt"
-            
-            # Register entity in registry first with suggested entity_id
-            unique_id = f"{device_addr}_mqtt"
-            entity_registry.async_get_or_create(
-                "light",
-                DOMAIN,
-                unique_id,
-                suggested_object_id=suggested_object_id,
-            )
-            
             # Create entity
             entity = HafeleLightEntity(
                 coordinator, device_addr, device_info, mqtt_client, topic_prefix
@@ -307,8 +291,47 @@ async def async_setup_entry(
             created_entities.add(device_addr)
 
         if new_entities:
-            _LOGGER.info("Adding %d new light entities", len(new_entities))
-            async_add_entities(new_entities)
+            # Final check: filter out any entities that might have been registered since we started
+            entities_to_add = []
+            for entity in new_entities:
+                unique_id = entity.unique_id
+                existing_entity_id = entity_registry.async_get_entity_id(
+                    "light", DOMAIN, unique_id
+                )
+                if existing_entity_id:
+                    _LOGGER.debug(
+                        "Entity %s already registered for unique_id %s, skipping add",
+                        existing_entity_id,
+                        unique_id,
+                    )
+                    # Remove from created_entities so we don't track it
+                    created_entities.discard(entity.device_addr)
+                else:
+                    entities_to_add.append(entity)
+            
+            if entities_to_add:
+                _LOGGER.info("Adding %d new light entities", len(entities_to_add))
+                # Register entities in registry with suggested entity_id before adding
+                import re
+                for entity in entities_to_add:
+                    device_name = entity.device_info.get("device_name", f"device_{entity.device_addr}")
+                    # Generate entity_id from device name: lowercase, replace spaces with underscores
+                    entity_id_base = device_name.lower().replace(" ", "_").replace("-", "_")
+                    # Remove any special characters that aren't allowed in entity IDs
+                    entity_id_base = re.sub(r"[^a-z0-9_]", "", entity_id_base)
+                    suggested_object_id = f"{entity_id_base}_mqtt"
+                    
+                    # Register entity in registry with suggested entity_id
+                    entity_registry.async_get_or_create(
+                        "light",
+                        DOMAIN,
+                        entity.unique_id,
+                        suggested_object_id=suggested_object_id,
+                    )
+                
+                async_add_entities(entities_to_add)
+            else:
+                _LOGGER.debug("All entities were already registered, skipping add")
 
     @callback
     def _on_devices_updated(event) -> None:
