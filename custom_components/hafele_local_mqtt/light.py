@@ -534,13 +534,13 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        # Use device-specific topic: {gateway_topic}/lights/{device_name}/setDevicePower
+        # Use device-specific topic: {gateway_topic}/lights/{device_name}/power
         power_topic = TOPIC_SET_DEVICE_POWER.format(
             prefix=self.topic_prefix, device_name=self._device_name
         )
 
-        # Build command payload - API uses "onOff" not "power"
-        command: dict[str, Any] = {"onOff": "on"}
+        # API expects boolean true/false directly, not a JSON object
+        power_command = True
 
         # Add brightness if specified
         if ATTR_BRIGHTNESS in kwargs:
@@ -549,7 +549,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             lightness_value = brightness / 255.0
             
             # Set power first
-            await self.mqtt_client.async_publish(power_topic, command, qos=1)
+            await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
             
             # Then set brightness using device-specific lightness topic
             lightness_topic = TOPIC_SET_DEVICE_LIGHTNESS.format(
@@ -558,13 +558,13 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             lightness_command = {"lightness": lightness_value}
             await self.mqtt_client.async_publish(lightness_topic, lightness_command, qos=1)
         else:
-            await self.mqtt_client.async_publish(power_topic, command, qos=1)
+            await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
 
         # Optimistically update state
         if self.coordinator.data:
-            self.coordinator.data.update(command)
+            self.coordinator.data.update({"onoff": 1})
         else:
-            self.coordinator.data = command
+            self.coordinator.data = {"onoff": 1}
 
         self.async_write_ha_state()
 
@@ -587,21 +587,21 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        # Use device-specific topic: {gateway_topic}/lights/{device_name}/setDevicePower
+        # Use device-specific topic: {gateway_topic}/lights/{device_name}/power
         power_topic = TOPIC_SET_DEVICE_POWER.format(
             prefix=self.topic_prefix, device_name=self._device_name
         )
 
-        # API uses "onOff" not "power"
-        command = {"onOff": "off"}
+        # API expects boolean true/false directly, not a JSON object
+        power_command = False
 
-        await self.mqtt_client.async_publish(power_topic, command, qos=1)
+        await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
 
         # Optimistically update state
         if self.coordinator.data:
-            self.coordinator.data.update(command)
+            self.coordinator.data.update({"onoff": 0})
         else:
-            self.coordinator.data = command
+            self.coordinator.data = {"onoff": 0}
 
         self.async_write_ha_state()
 
@@ -610,7 +610,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         async def _refresh_status() -> None:
             await asyncio.sleep(0.2)  # 200ms delay
             get_power_topic = TOPIC_GET_DEVICE_POWER.format(
-                prefix=self.topic_prefix, device_name=self._encoded_device_name
+                prefix=self.topic_prefix, device_name=self._device_name
             )
             await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
         

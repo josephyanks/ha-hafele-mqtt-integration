@@ -163,10 +163,13 @@ class HafeleMQTTClient:
             _LOGGER.debug("Unsubscribed from topic: %s", topic)
 
     async def async_publish(
-        self, topic: str, payload: str | dict[str, Any], qos: int = 0, retain: bool = False
+        self, topic: str, payload: str | dict[str, Any] | bool, qos: int = 0, retain: bool = False
     ) -> None:
         """Publish a message to an MQTT topic."""
         if isinstance(payload, dict):
+            payload = json.dumps(payload)
+        elif isinstance(payload, bool):
+            # Convert boolean to JSON string (true/false)
             payload = json.dumps(payload)
 
         _LOGGER.debug("Publishing to topic %s: %s", topic, payload)
