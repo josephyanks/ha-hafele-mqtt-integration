@@ -328,14 +328,6 @@ async def async_setup_entry(
     # Create entities for any devices already discovered
     await _create_entities_for_devices()
     
-    # Create group light entities for Hafele groups
-    enable_groups = entry.data.get("enable_groups", True)
-    
-    if enable_groups:
-        # Import and call the group light setup
-        from .group_light import async_setup_entry as async_setup_group_lights
-        await async_setup_group_lights(hass, entry, async_add_entities)
-    
     # On startup, request status for all devices via TOS_Internal_All group
     # This triggers status updates for all devices in the group
     async def _request_all_device_status() -> None:
@@ -441,6 +433,9 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         # Store device name (use as-is, no encoding)
         device_name = device_info.get("device_name", f"device_{device_addr}")
         self._device_name = device_name
+        
+        # Store last known lightness value (0-1 scale, as used by API)
+        self._last_known_lightness: float | None = None
 
         # Device info
         location = device_info.get("location", "Unknown")
@@ -495,6 +490,9 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
     def brightness(self) -> int | None:
         """Return the brightness of the light."""
         if not self.coordinator.data:
+            # If we have last known lightness, return that (even when off)
+            if self._last_known_lightness is not None:
+                return int(self._last_known_lightness * 255)
             return None
 
         status = self.coordinator.data
@@ -504,22 +502,37 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             if lightness is not None:
                 # Convert from 0-1 scale to 0-255 for Home Assistant
                 if isinstance(lightness, (int, float)):
-                    return int(lightness * 255)
+                    lightness_float = float(lightness)
+                    # Store last known lightness (always store when we receive a value)
+                    self._last_known_lightness = lightness_float
+                    return int(lightness_float * 255)
             # Fallback to other common formats for compatibility
             brightness = status.get("brightness")
             if brightness is not None:
                 if isinstance(brightness, (int, float)):
                     if brightness > 255:
                         # Assume 0-100 scale
-                        return int((brightness / 100) * 255)
-                    return int(brightness)
+                        brightness_value = int((brightness / 100) * 255)
+                    else:
+                        brightness_value = int(brightness)
+                    # Store last known lightness (convert to 0-1 scale)
+                    self._last_known_lightness = brightness_value / 255.0
+                    return brightness_value
             level = status.get("level")
             if level is not None:
                 if isinstance(level, (int, float)):
                     if level > 255:
-                        return int((level / 100) * 255)
-                    return int(level)
+                        level_value = int((level / 100) * 255)
+                    else:
+                        level_value = int(level)
+                    # Store last known lightness (convert to 0-1 scale)
+                    self._last_known_lightness = level_value / 255.0
+                    return level_value
 
+        # If we have last known lightness, return that (even when off)
+        if self._last_known_lightness is not None:
+            return int(self._last_known_lightness * 255)
+        
         return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -532,7 +545,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         # API expects boolean true/false directly, not a JSON object
         power_command = True
 
-        # Add brightness if specified
+        # Add brightness if specified, otherwise use last known lightness
         if ATTR_BRIGHTNESS in kwargs:
             brightness = kwargs[ATTR_BRIGHTNESS]
             # Convert to 0-1 scale (API uses 0-1 for lightness)
@@ -540,6 +553,9 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             # Round to 2 decimal places, rounding up
             # Multiply by 100, round up with ceil, then divide by 100
             lightness_value = math.ceil(lightness_value * 100) / 100.0
+            
+            # Store as last known lightness
+            self._last_known_lightness = lightness_value
             
             # Set power first
             await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
@@ -568,29 +584,63 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             hass = self.coordinator.hass
             hass.async_create_task(_request_lightness_after_ramp())
         else:
-            await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
-            
-            # Optimistically update state with power value we just set
-            if self.coordinator.data:
-                self.coordinator.data.update({"onoff": 1})
+            # No brightness specified - use last known lightness if available
+            if self._last_known_lightness is not None:
+                lightness_value = self._last_known_lightness
+                # Round to 2 decimal places, rounding up
+                lightness_value = math.ceil(lightness_value * 100) / 100.0
+                
+                # Set power first
+                await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
+                
+                # Then set brightness using device-specific lightness topic
+                lightness_topic = TOPIC_SET_DEVICE_LIGHTNESS.format(
+                    prefix=self.topic_prefix, device_name=self._device_name
+                )
+                lightness_command = {"lightness": lightness_value}
+                await self.mqtt_client.async_publish(lightness_topic, lightness_command, qos=1)
+                
+                # Optimistically update state with both power and lightness values we just set
+                if self.coordinator.data:
+                    self.coordinator.data.update({"onoff": 1, "lightness": lightness_value})
+                else:
+                    self.coordinator.data = {"onoff": 1, "lightness": lightness_value}
+                
+                # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
+                async def _request_lightness_after_ramp() -> None:
+                    await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
+                    get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                        prefix=self.topic_prefix, device_name=self._device_name
+                    )
+                    await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+                
+                hass = self.coordinator.hass
+                hass.async_create_task(_request_lightness_after_ramp())
             else:
-                self.coordinator.data = {"onoff": 1}
-            
-            # Schedule a powerGet request 5 seconds after setting to get final value after ramping
-            async def _request_power_after_ramp() -> None:
-                await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-                get_power_topic = TOPIC_GET_DEVICE_POWER.format(
-                    prefix=self.topic_prefix, device_name=self._device_name
-                )
-                await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
-                # Also request lightness status
-                get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                    prefix=self.topic_prefix, device_name=self._device_name
-                )
-                await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-            
-            hass = self.coordinator.hass
-            hass.async_create_task(_request_power_after_ramp())
+                # No last known lightness - just turn on without setting brightness
+                await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
+                
+                # Optimistically update state with power value we just set
+                if self.coordinator.data:
+                    self.coordinator.data.update({"onoff": 1})
+                else:
+                    self.coordinator.data = {"onoff": 1}
+                
+                # Schedule a powerGet request 5 seconds after setting to get final value after ramping
+                async def _request_power_after_ramp() -> None:
+                    await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
+                    get_power_topic = TOPIC_GET_DEVICE_POWER.format(
+                        prefix=self.topic_prefix, device_name=self._device_name
+                    )
+                    await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
+                    # Also request lightness status
+                    get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                        prefix=self.topic_prefix, device_name=self._device_name
+                    )
+                    await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+                
+                hass = self.coordinator.hass
+                hass.async_create_task(_request_power_after_ramp())
 
         self.async_write_ha_state()
 
