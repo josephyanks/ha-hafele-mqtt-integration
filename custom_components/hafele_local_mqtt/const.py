@@ -3,7 +3,7 @@
 DOMAIN = "hafele_local_mqtt"
 
 # MQTT Topic Prefix
-DEFAULT_TOPIC_PREFIX = "alm/haefele"
+DEFAULT_TOPIC_PREFIX = "hafele"
 
 # Discovery Topics
 TOPIC_LIGHTS = "lights"
@@ -11,8 +11,8 @@ TOPIC_GROUPS = "groups"
 TOPIC_SCENES = "scenes"
 
 # Polling Configuration
-DEFAULT_POLLING_INTERVAL = 6000  # seconds
-DEFAULT_POLLING_TIMEOUT = 10  # seconds
+DEFAULT_POLLING_INTERVAL = 60  # seconds
+DEFAULT_POLLING_TIMEOUT = 5  # seconds
 
 # MQTT Topic Patterns - Verified against API documentation
 # Reference: https://help.connect-mesh.io/mqtt/index.html
