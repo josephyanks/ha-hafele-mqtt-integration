@@ -13,7 +13,7 @@ from homeassistant.components.light import (
     COLOR_MODE_COLOR_TEMP,
     ColorMode,
     LightEntity,
-    ATTR_COLOR_TEMP,
+    ATTR_COLOR_TEMP_KELVIN,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -437,8 +437,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         if self._is_multiwhite:
             self._attr_supported_color_modes = {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP}
             self._attr_color_mode = ColorMode.COLOR_TEMP
-            self._attr_min_mireds = 200   # 5000K
-            self._attr_max_mireds = 370   # 2700K
+            self._attr_max_color_temp_kelvin = 5000
+            self._attr_min_color_temp_kelvin = 2700
         else:
             self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
             self._attr_color_mode = ColorMode.BRIGHTNESS
@@ -515,9 +515,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             if getattr(self, "_is_multiwhite", False):
                 temp_kelvin = status.get("temperature")
                 if temp_kelvin is not None:
-                    # convert to mired for HA
-                    temp_kelvin = min(max(temp_kelvin, 2700), 5700)
-                    self._attr_color_temp = int(1_000_000 / temp_kelvin)
+
+                    self._attr_color_temp = min(max(temp_kelvin, 2700), 5700)
                     self._attr_color_mode = ColorMode.COLOR_TEMP
             # API uses "lightness" field with 0-1 scale
             lightness = status.get("lightness")
@@ -570,9 +569,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                 lightness = self._last_known_lightness or 1.0
 
             # Color temperature
-            if ATTR_COLOR_TEMP in kwargs:
-                temp_mired = kwargs[ATTR_COLOR_TEMP]
-                temp_kelvin = int(1_000_000 / temp_mired)
+            if ATTR_COLOR_TEMP_KELVIN in kwargs:
+                temp_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
                 self._attr_color_temp = min(max(temp_kelvin, 2700), 5700)
             else:
                 self._attr_color_temp = self._attr_color_temp or 2700
