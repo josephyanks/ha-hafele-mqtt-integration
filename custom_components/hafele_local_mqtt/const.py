@@ -32,6 +32,7 @@ TOPIC_SET_DEVICE_POWER = "{prefix}/lights/{device_name}/power"  # Operation ID: 
 TOPIC_GET_DEVICE_POWER = "{prefix}/lights/{device_name}/powerGet"  # Operation ID: getDevicePower
 TOPIC_SET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightness"  # Operation ID: setDeviceLightness
 TOPIC_GET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightnessGet"  # Operation ID: getDeviceLightness
+TOPIC_SET_DEVICE_TEMPERATURE = "{prefix}/lights/{device_name}/temperature"  # Operation ID: setDeviceTemperature
 TOPIC_SET_GROUP_POWER = "{prefix}/groups/{group_name}/power"  # Operation ID: setGroupPower
 TOPIC_GET_GROUP_POWER = "{prefix}/groups/{group_name}/powerGet"  # Operation ID: getGroupPower
 TOPIC_SET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # Operation ID: setGroupLightness
