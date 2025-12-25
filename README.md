@@ -6,6 +6,7 @@
 <img src="./custom_components/hafele_local_mqtt/logo/icon.png" height="128" width="128" />
 
 Home Assistant custom integration for controlling Hafele LED lights via MQTT using local control.
+You need a "Gateway, Häfele Connect Mesh" which will be the bridge between the Bluetooth LE network and the MQTT.
 
 Please note that this should be considered unstable and is definitely in an alpha stage. 
 
@@ -20,7 +21,7 @@ Please note that this should be considered unstable and is definitely in an alph
 
 ## Installation
 
-The first part of installation should be enabling the MQTT functionality on your hafele devices. Please follow directions found in this github issue: [https://github.com/qnimbus/haefele-connect-mesh/issues/2](https://github.com/qnimbus/haefele-connect-mesh/issues/2)
+The first part of installation should be enabling the MQTT functionality on your hafele devices. Please follow directions found in this github issue: [https://github.com/qnimbus/haefele-connect-mesh/issues/2](https://github.com/qnimbus/haefele-connect-mesh/issues/2) and the official documentation [https://help.connect-mesh.io/docs/smarthome/gateway-setup](https://help.connect-mesh.io/docs/smarthome/gateway-setup)
 
 I ended up installing Mosquito Broker and MQTT Explorer on my HA instance as well to facilitate the installation.
 
@@ -112,6 +113,11 @@ Uses the kind-of-public [Hafele MQTT api for connect mesh](https://help.connect-
 2. Check that all files are present in the integration folder
 3. Restart Home Assistant completely
 4. Check Home Assistant logs for import errors
+
+### Known Bugs
+1. Color Temperature of Multiwhite lights not settable on single light / but working on Group Temperature setting in MQTT
+2. API / MQTT mismatch -> nowhere in the mqtt light temperature data is available
+3. Due to high polling rates or big networks the response time of buttons/inputs will decrease due to high bluetooh LE traffic
 
 ## Development
 

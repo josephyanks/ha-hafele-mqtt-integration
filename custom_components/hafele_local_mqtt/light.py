@@ -10,8 +10,10 @@ from typing import Any, Callable
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
+    COLOR_MODE_COLOR_TEMP,
     ColorMode,
     LightEntity,
+    ATTR_COLOR_TEMP,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -28,6 +30,7 @@ from .const import (
     EVENT_DEVICES_UPDATED,
     TOPIC_GET_DEVICE_LIGHTNESS,
     TOPIC_GET_DEVICE_POWER,
+    TOPIC_SET_DEVICE_TEMPERATURE,
     TOPIC_GET_GROUP_LIGHTNESS,
     TOPIC_GET_GROUP_POWER,
     TOPIC_SET_DEVICE_LIGHTNESS,
@@ -122,7 +125,6 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
                 # If existing data isn't a dict, just use the new data
                 self._status_data = data
                 merged_data = data
-
             self._status_received = True
             _LOGGER.debug(
                 "Received status for device %s (name: %s): %s (merged: %s)",
@@ -152,7 +154,6 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
             prefix=self.topic_prefix, device_name=self._device_name
         )
-
         _LOGGER.debug(
             "Requesting status for device %s (name: %s) on topics: %s, %s",
             self.device_addr,
@@ -242,7 +243,9 @@ async def async_setup_entry(
             # Since these come from the lights discovery topic, they should all be lights
             # But check device_types if it exists to be safe
             device_types = device_info.get("device_types", [])
-            if device_types and "Light" not in device_types:
+
+            # Treat "Light" and "Multiwhite" as light devices
+            if device_types and not any(t.lower() in ("light", "multiwhite") for t in device_types):
                 _LOGGER.debug(
                     "Skipping device %s (addr: %s) - not a light type",
                     device_info.get("device_name"),
@@ -428,7 +431,17 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         self._attr_unique_id = f"{device_addr}_mqtt"
         self._attr_name = device_info.get("device_name", f"Hafele Light {device_addr}")
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
-        self._attr_color_mode = ColorMode.BRIGHTNESS
+        device_types = device_info.get("device_types", [])
+        self._is_multiwhite = any(t.lower() == "multiwhite" for t in device_types)
+
+        if self._is_multiwhite:
+            self._attr_supported_color_modes = {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP}
+            self._attr_color_mode = ColorMode.COLOR_TEMP
+            self._attr_min_mireds = 200   # 5000K
+            self._attr_max_mireds = 370   # 2700K
+        else:
+            self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+            self._attr_color_mode = ColorMode.BRIGHTNESS
 
         # Store device name (use as-is, no encoding)
         device_name = device_info.get("device_name", f"device_{device_addr}")
@@ -439,6 +452,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         # Device info
         location = device_info.get("location", "Unknown")
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(device_addr))},
             name=self._attr_name,
@@ -497,6 +511,14 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         status = self.coordinator.data
         if isinstance(status, dict):
+            # Multiwhite color temp
+            if getattr(self, "_is_multiwhite", False):
+                temp_kelvin = status.get("temperature")
+                if temp_kelvin is not None:
+                    # convert to mired for HA
+                    temp_kelvin = min(max(temp_kelvin, 2700), 5700)
+                    self._attr_color_temp = int(1_000_000 / temp_kelvin)
+                    self._attr_color_mode = ColorMode.COLOR_TEMP
             # API uses "lightness" field with 0-1 scale
             lightness = status.get("lightness")
             if lightness is not None:
@@ -537,6 +559,70 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
+        # --- MULTIWHITE ---
+        if self._is_multiwhite:
+            # Brightness
+            if ATTR_BRIGHTNESS in kwargs:
+                brightness = kwargs[ATTR_BRIGHTNESS]
+                lightness = math.ceil((brightness / 255.0) * 100) / 100.0
+                self._last_known_lightness = lightness
+            else:
+                lightness = self._last_known_lightness or 1.0
+
+            # Color temperature
+            if ATTR_COLOR_TEMP in kwargs:
+                temp_mired = kwargs[ATTR_COLOR_TEMP]
+                temp_kelvin = int(1_000_000 / temp_mired)
+                self._attr_color_temp = min(max(temp_kelvin, 2700), 5700)
+            else:
+                self._attr_color_temp = self._attr_color_temp or 2700
+
+            payload_br = {
+                "state": "on",
+                "lightness": lightness,
+            }
+
+            topic_br = TOPIC_SET_DEVICE_LIGHTNESS.format(
+                prefix=self.topic_prefix, device_name=self._device_name
+            )
+            payload_temp = {
+                "temperature": self._attr_color_temp,
+            }
+
+            topic_temp = TOPIC_SET_DEVICE_TEMPERATURE.format(
+                prefix=self.topic_prefix, device_name=self._device_name
+            )
+
+            await self.mqtt_client.async_publish(topic_br, payload_br, qos=1)
+
+            await self.mqtt_client.async_publish(topic_temp, payload_temp, qos=1)
+            # Optimistically update state
+            if self.coordinator.data:
+                self.coordinator.data.update(
+                    {
+                        "onoff": 1,
+                        "lightness": lightness,
+                        "temperature": self._attr_color_temp,
+                    }
+                )
+            else:
+                self.coordinator.data = {
+                    "onoff": 1,
+                    "lightness": lightness,
+                    "temperature": self._attr_color_temp,
+                }
+            # Optimistic state update
+            self.coordinator.data = {
+                "onoff": 1,
+                "lightness": lightness,
+                "temperature": self._attr_color_temp,
+            }
+
+            self._attr_color_mode = ColorMode.COLOR_TEMP
+            self.async_write_ha_state()
+            return
+
+        # --- Monochrome ---
         # Use device-specific topic: {gateway_topic}/lights/{device_name}/power
         power_topic = TOPIC_SET_DEVICE_POWER.format(
             prefix=self.topic_prefix, device_name=self._device_name
@@ -553,20 +639,20 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             # Round to 2 decimal places, rounding up
             # Multiply by 100, round up with ceil, then divide by 100
             lightness_value = math.ceil(lightness_value * 100) / 100.0
-            
+
             # Store as last known lightness
             self._last_known_lightness = lightness_value
-            
+
             # Set power first
             await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
-            
+
             # Then set brightness using device-specific lightness topic
             lightness_topic = TOPIC_SET_DEVICE_LIGHTNESS.format(
                 prefix=self.topic_prefix, device_name=self._device_name
             )
             lightness_command = {"lightness": lightness_value}
             await self.mqtt_client.async_publish(lightness_topic, lightness_command, qos=1)
-            
+
             # Optimistically update state with both power and lightness values we just set
             if self.coordinator.data:
                 self.coordinator.data.update({"onoff": 1, "lightness": lightness_value})
@@ -671,7 +757,6 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                 prefix=self.topic_prefix, device_name=self._device_name
             )
             await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
-        
+
         hass = self.coordinator.hass
         hass.async_create_task(_request_power_after_ramp())
-

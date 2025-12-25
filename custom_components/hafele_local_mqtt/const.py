@@ -3,7 +3,7 @@
 DOMAIN = "hafele_local_mqtt"
 
 # MQTT Topic Prefix
-DEFAULT_TOPIC_PREFIX = "hafele"
+DEFAULT_TOPIC_PREFIX = "alm/haefele"
 
 # Discovery Topics
 TOPIC_LIGHTS = "lights"
@@ -11,8 +11,8 @@ TOPIC_GROUPS = "groups"
 TOPIC_SCENES = "scenes"
 
 # Polling Configuration
-DEFAULT_POLLING_INTERVAL = 60  # seconds
-DEFAULT_POLLING_TIMEOUT = 5  # seconds
+DEFAULT_POLLING_INTERVAL = 6000  # seconds
+DEFAULT_POLLING_TIMEOUT = 10  # seconds
 
 # MQTT Topic Patterns - Verified against API documentation
 # Reference: https://help.connect-mesh.io/mqtt/index.html
@@ -32,6 +32,7 @@ TOPIC_SET_DEVICE_POWER = "{prefix}/lights/{device_name}/power"  # Operation ID: 
 TOPIC_GET_DEVICE_POWER = "{prefix}/lights/{device_name}/powerGet"  # Operation ID: getDevicePower
 TOPIC_SET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightness"  # Operation ID: setDeviceLightness
 TOPIC_GET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightnessGet"  # Operation ID: getDeviceLightness
+TOPIC_SET_DEVICE_TEMPERATURE = "{prefix}/lights/{device_name}/temperature"  # Operation ID: setDeviceTemperature
 TOPIC_SET_GROUP_POWER = "{prefix}/groups/{group_name}/power"  # Operation ID: setGroupPower
 TOPIC_GET_GROUP_POWER = "{prefix}/groups/{group_name}/powerGet"  # Operation ID: getGroupPower
 TOPIC_SET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # Operation ID: setGroupLightness
