@@ -76,12 +76,7 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
             prefix=topic_prefix, device_name=device_name
         )
 
-        _LOGGER.debug(
-            "Setting up status subscription for device %s (name: %s) on topic: %s",
-            device_addr,
-            device_name,
-            status_topic,
-        )
+
 
         # Device-specific status topic
         self.response_topics = [status_topic]
@@ -94,6 +89,13 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
             timedelta(seconds=polling_interval)
             if polling_mode == POLLING_MODE_NORMAL
             else None
+        )
+        _LOGGER.debug(
+            "Setting up status subscription for device %s (name: %s) on topic: %s with update interval %s",
+            device_addr,
+            device_name,
+            status_topic,
+            update_interval
         )
         super().__init__(
             hass,
@@ -223,6 +225,8 @@ async def async_setup_entry(
     polling_interval = data["polling_interval"]
     polling_timeout = data["polling_timeout"]
     polling_mode = data.get("polling_mode", DEFAULT_POLLING_MODE)
+    _LOGGER.debug(f"async_setup_entry: topic_prefix {topic_prefix}, polling mode: {polling_mode},"
+                  f" polling interval {polling_interval}")
 
     # Track which entities we've already created in this session
     created_entities: set[int] = set()
@@ -303,7 +307,9 @@ async def async_setup_entry(
             # Start individual coordinator polling
             # Use async_request_refresh instead of async_config_entry_first_refresh
             # since we don't have a config entry reference in the coordinator
-            await coordinator.async_request_refresh()
+            # don't refresh at the start - otherwise the BLE Network gets spammed
+            # polling will update it later
+            # await coordinator.async_request_refresh()
 
             # Create entity
             entity = HafeleLightEntity(
@@ -338,6 +344,7 @@ async def async_setup_entry(
             # Add all entities - Home Assistant will handle duplicates gracefully
             # and restore existing entities properly
             async_add_entities(new_entities, update_before_add=False)
+            _LOGGER.info("Finished adding %d light entities", len(new_entities))
 
     @callback
     def _on_devices_updated(event) -> None:
@@ -351,7 +358,7 @@ async def async_setup_entry(
 
     # Create entities for any devices already discovered
     await _create_entities_for_devices()
-    
+
     # Start rotational polling only if polling_mode is rotational
     # Normal mode uses per-device automatic polling via update_interval
     if polling_mode == POLLING_MODE_ROTATIONAL:
@@ -389,6 +396,7 @@ async def async_setup_entry(
         _LOGGER.info("Rotational polling mode enabled - polling one device at a time")
     else:
         _LOGGER.info("Normal polling mode enabled - each device polls independently")
+
 
 
 class HafeleLightEntity(CoordinatorEntity, LightEntity):
