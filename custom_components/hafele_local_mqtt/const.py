@@ -19,9 +19,9 @@ DEFAULT_POLLING_TIMEOUT = 5  # seconds
 
 # Discovery topics (RECEIVE - Subscribe)
 # API: RECEIVE lightsDiscovery, groupDiscovery, sceneDiscovery
-TOPIC_DISCOVERY_LIGHTS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_LIGHTS}"  # {gateway_topic}/lights
-TOPIC_DISCOVERY_GROUPS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_GROUPS}"  # {gateway_topic}/groups
-TOPIC_DISCOVERY_SCENES = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_SCENES}"  # {gateway_topic}/scenes
+TOPIC_DISCOVERY_LIGHTS = f"{{prefix}}/{TOPIC_LIGHTS}"  # {gateway_topic}/lights
+TOPIC_DISCOVERY_GROUPS = f"{{prefix}}/{TOPIC_GROUPS}"  # {gateway_topic}/groups
+TOPIC_DISCOVERY_SCENES = f"{{prefix}}/{TOPIC_SCENES}"  # {gateway_topic}/scenes
 
 # Control topics (SEND - Publish)
 # Note: Operation IDs (like setDevicePower, getDevicePower) are for API lookup only, not used in topics
@@ -57,7 +57,7 @@ CONF_ENABLE_SCENES = "enable_scenes"
 
 # Polling modes
 POLLING_MODE_NORMAL = "normal"  # Each device polls independently
-POLLING_MODE_ROTATIONAL = "rotational"  # One device at a time in rotation
+POLLING_MODE_ROTATIONAL = "rotational"  # One device at a time in rotation - use at big networks (>5 lights)
 DEFAULT_POLLING_MODE = POLLING_MODE_NORMAL
 
 # MQTT Broker Configuration (optional - uses HA MQTT if not provided)
