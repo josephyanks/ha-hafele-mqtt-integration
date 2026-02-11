@@ -20,14 +20,18 @@ from .const import (
     CONF_MQTT_PORT,
     CONF_MQTT_USERNAME,
     CONF_POLLING_INTERVAL,
+    CONF_POLLING_MODE,
     CONF_POLLING_TIMEOUT,
     CONF_TOPIC_PREFIX,
     CONF_USE_HA_MQTT,
     DEFAULT_MQTT_PORT,
     DEFAULT_POLLING_INTERVAL,
+    DEFAULT_POLLING_MODE,
     DEFAULT_POLLING_TIMEOUT,
     DEFAULT_TOPIC_PREFIX,
     DOMAIN,
+    POLLING_MODE_NORMAL,
+    POLLING_MODE_ROTATIONAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,6 +52,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_POLLING_TIMEOUT, default=DEFAULT_POLLING_TIMEOUT
         ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+        vol.Optional(
+            CONF_POLLING_MODE, default=DEFAULT_POLLING_MODE
+        ): vol.In([POLLING_MODE_NORMAL, POLLING_MODE_ROTATIONAL]),
         vol.Optional(CONF_ENABLE_GROUPS, default=True): bool,
         vol.Optional(CONF_ENABLE_SCENES, default=True): bool,
     }

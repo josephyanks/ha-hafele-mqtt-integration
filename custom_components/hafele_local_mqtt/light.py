@@ -36,6 +36,8 @@ from .const import (
     TOPIC_SET_DEVICE_LIGHTNESS,
     TOPIC_SET_DEVICE_POWER,
     TOPIC_DEVICE_STATUS,
+    POLLING_MODE_NORMAL,
+    POLLING_MODE_ROTATIONAL,
 )
 from .discovery import HafeleDiscovery
 from .mqtt_client import HafeleMQTTClient
@@ -55,6 +57,7 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         topic_prefix: str,
         polling_interval: int,
         polling_timeout: int,
+        polling_mode: str,
     ) -> None:
         """Initialize the coordinator."""
         self.mqtt_client = mqtt_client
@@ -82,11 +85,19 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         self.response_topics = [status_topic]
         self._device_name = device_name
 
+        # Set update_interval based on polling mode
+        # For normal mode: each device polls independently
+        # For rotational mode: no automatic polling, rotational loop handles it
+        update_interval = (
+            timedelta(seconds=polling_interval)
+            if polling_mode == POLLING_MODE_NORMAL
+            else None
+        )
         super().__init__(
             hass,
             _LOGGER,
             name=f"hafele_light_{device_addr}",
-            update_interval=timedelta(seconds=polling_interval),
+            update_interval=update_interval,
         )
 
     async def _async_setup_subscriptions(self) -> None:
@@ -154,18 +165,15 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch status from device via MQTT polling."""
         import asyncio
-        # Request status using getDevicePower and getDeviceLightness operations
-        get_power_topic = TOPIC_GET_DEVICE_POWER.format(
-            prefix=self.topic_prefix, device_name=self._device_name
-        )
+        # Request status using getDeviceLightness operation only
+        # Power state is inferred from lightness (lightness > 0 = on)
         get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
             prefix=self.topic_prefix, device_name=self._device_name
         )
         _LOGGER.debug(
-            "Requesting status for device %s (name: %s) on topics: %s, %s",
+            "Requesting lightness status for device %s (name: %s) on topic: %s",
             self.device_addr,
             self.device_name,
-            get_power_topic,
             get_lightness_topic,
         )
 
@@ -174,8 +182,7 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         # Keep a copy of existing data to preserve it if no response comes
         old_data = self._status_data.copy() if isinstance(self._status_data, dict) else {}
 
-        # Request both power and lightness status
-        await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
+        # Request only lightness status (power inferred from lightness)
         await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
 
         # Wait for response (with timeout)
@@ -210,6 +217,7 @@ async def async_setup_entry(
     topic_prefix = data["topic_prefix"]
     polling_interval = data["polling_interval"]
     polling_timeout = data["polling_timeout"]
+    polling_mode = data.get("polling_mode", POLLING_MODE_ROTATIONAL)
 
     # Track which entities we've already created in this session
     created_entities: set[int] = set()
@@ -278,6 +286,7 @@ async def async_setup_entry(
                 topic_prefix,
                 polling_interval,
                 polling_timeout,
+                polling_mode,
             )
 
             # Set up subscriptions to device status topic
@@ -338,84 +347,43 @@ async def async_setup_entry(
     # Create entities for any devices already discovered
     await _create_entities_for_devices()
     
-    # On startup, request status for all devices via TOS_Internal_All group
-    # This triggers status updates for all devices in the group
-    async def _request_all_device_status() -> None:
-        """Request status for all devices via TOS_Internal_All group."""
-        # Wait a moment for discovery to complete
-        await asyncio.sleep(1.0)
-        
-        # Check if TOS_Internal_All group exists
-        all_groups = discovery.get_all_groups()
-        tos_group_name = None
-        for group_addr, group_info in all_groups.items():
-            group_name = group_info.get("group_name", "")
-            if group_name == "TOS_Internal_All":
-                tos_group_name = group_name
-                break
-        
-        if tos_group_name:
-            # Get list of devices to track responses
-            devices = discovery.get_all_devices()
-            device_count = len(devices)
+    # Start rotational polling only if polling_mode is rotational
+    # Normal mode uses per-device automatic polling via update_interval
+    if polling_mode == POLLING_MODE_ROTATIONAL:
+        async def _rotational_polling_loop() -> None:
+            """Rotational polling: poll one device every polling_interval seconds."""
+            # Wait a moment for discovery to complete
+            await asyncio.sleep(2.0)
             
-            if device_count > 0:
-                _LOGGER.info(
-                    "Requesting power status for all %d devices via TOS_Internal_All group",
-                    device_count
-                )
-                power_get_topic = TOPIC_GET_GROUP_POWER.format(
-                    prefix=topic_prefix, group_name=tos_group_name
-                )
-                await mqtt_client.async_publish(power_get_topic, {}, qos=1)
+            current_index = 0
+            while True:
+                # Get current list of coordinators (may change as devices are discovered)
+                current_coordinators = list(coordinators.values())
                 
-                # Wait for power responses from all devices
-                # Check which coordinators have received power status (have "onoff" field)
-                max_wait_time = 5.0  # Maximum wait time in seconds
-                check_interval = 0.2  # Check every 200ms
-                elapsed = 0.0
-                devices_with_power = set()
-                
-                _LOGGER.debug("Waiting for power status responses from all devices...")
-                while elapsed < max_wait_time:
-                    # Check which devices have received power status
-                    for device_addr, coordinator in coordinators.items():
-                        status_data = coordinator._status_data
-                        if isinstance(status_data, dict) and "onoff" in status_data:
-                            devices_with_power.add(device_addr)
-                    
-                    # If all devices have responded, break early
-                    if len(devices_with_power) >= device_count:
-                        _LOGGER.debug(
-                            "Received power status from all %d devices",
-                            len(devices_with_power)
-                        )
-                        break
-                    
-                    await asyncio.sleep(check_interval)
-                    elapsed += check_interval
-                
-                if len(devices_with_power) < device_count:
+                if current_coordinators:
+                    # Poll the next device in rotation
+                    coordinator = current_coordinators[current_index % len(current_coordinators)]
                     _LOGGER.debug(
-                        "Received power status from %d/%d devices after %.1f seconds",
-                        len(devices_with_power),
-                        device_count,
-                        elapsed,
+                        "Rotational poll: requesting status for device %s (name: %s)",
+                        coordinator.device_addr,
+                        coordinator.device_name,
                     )
+                    await coordinator.async_request_refresh()
+                    
+                    # Move to next device
+                    current_index += 1
+                else:
+                    # No devices yet, wait a bit longer
+                    await asyncio.sleep(1.0)
                 
-                # Now request lightness status
-                _LOGGER.info("Requesting lightness status for all devices via TOS_Internal_All group")
-                lightness_get_topic = TOPIC_GET_GROUP_LIGHTNESS.format(
-                    prefix=topic_prefix, group_name=tos_group_name
-                )
-                await mqtt_client.async_publish(lightness_get_topic, {}, qos=1)
-            else:
-                _LOGGER.debug("No devices discovered yet, skipping group status request")
-        else:
-            _LOGGER.debug("TOS_Internal_All group not found, skipping group status request")
-    
-    # Request all device status on startup
-    hass.async_create_task(_request_all_device_status())
+                # Wait before polling next device
+                await asyncio.sleep(polling_interval)
+        
+        # Start rotational polling task
+        hass.async_create_task(_rotational_polling_loop())
+        _LOGGER.info("Rotational polling mode enabled - polling one device at a time")
+    else:
+        _LOGGER.info("Normal polling mode enabled - each device polls independently")
 
 
 class HafeleLightEntity(CoordinatorEntity, LightEntity):
@@ -482,10 +450,11 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         return {ColorMode.BRIGHTNESS}
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return if the light is on."""
         if not self.coordinator.data:
-            return False
+            # Return None to show unknown state until first poll completes
+            return None
 
         # Parse status data - API uses "onoff" or "onOff" field
         # Status responses use numeric: 1 = on, 0 = off
@@ -534,9 +503,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
     def brightness(self) -> int | None:
         """Return the brightness of the light."""
         if not self.coordinator.data:
-            # If we have last known lightness, return that (even when off)
-            if self._last_known_lightness is not None:
-                return int(self._last_known_lightness * 255)
+            # Return None to show unknown state until first poll completes
+            # Don't use last_known_lightness here to show true unknown state
             return None
 
         status = self.coordinator.data
@@ -729,21 +697,17 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                 else:
                     self.coordinator.data = {"onoff": 1}
                 
-                # Schedule a powerGet request 5 seconds after setting to get final value after ramping
-                async def _request_power_after_ramp() -> None:
+                # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
+                # Power state is inferred from lightness, so no need to poll power separately
+                async def _request_lightness_after_ramp() -> None:
                     await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-                    get_power_topic = TOPIC_GET_DEVICE_POWER.format(
-                        prefix=self.topic_prefix, device_name=self._device_name
-                    )
-                    await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
-                    # Also request lightness status
                     get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
                         prefix=self.topic_prefix, device_name=self._device_name
                     )
                     await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
                 
                 hass = self.coordinator.hass
-                hass.async_create_task(_request_power_after_ramp())
+                hass.async_create_task(_request_lightness_after_ramp())
 
         self.async_write_ha_state()
 
@@ -767,13 +731,14 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         self.async_write_ha_state()
 
-        # Schedule a powerGet request 5 seconds after setting to get final value after ramping
-        async def _request_power_after_ramp() -> None:
+        # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
+        # Power state is inferred from lightness, so no need to poll power separately
+        async def _request_lightness_after_ramp() -> None:
             await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-            get_power_topic = TOPIC_GET_DEVICE_POWER.format(
+            get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
                 prefix=self.topic_prefix, device_name=self._device_name
             )
-            await self.mqtt_client.async_publish(get_power_topic, {}, qos=1)
+            await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
 
         hass = self.coordinator.hass
-        hass.async_create_task(_request_power_after_ramp())
+        hass.async_create_task(_request_lightness_after_ramp())
