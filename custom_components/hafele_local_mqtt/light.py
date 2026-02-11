@@ -6,7 +6,7 @@ import json
 import logging
 import math
 from datetime import timedelta
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -30,7 +30,7 @@ from .const import (
     EVENT_DEVICES_UPDATED,
     TOPIC_GET_DEVICE_LIGHTNESS,
     TOPIC_GET_DEVICE_POWER,
-    TOPIC_SET_DEVICE_TEMPERATURE,
+    TOPIC_SET_DEVICE_CTL,
     TOPIC_GET_GROUP_LIGHTNESS,
     TOPIC_GET_GROUP_POWER,
     TOPIC_SET_DEVICE_LIGHTNESS,
@@ -114,6 +114,14 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
                 data = json.loads(payload)
             else:
                 data = payload
+            if "lightness" in data:
+                # also update power - if häfele lightness == 0 -> off, else on
+                if data["lightness"] > 0:
+                    data["onoff"] = 1
+                else:
+                    data["onoff"] = 0
+                _LOGGER.debug(f'Updating onoff to {data["onoff"]} due to lightness {data["lightness"]}')
+
 
             # Merge new status data with existing data
             # Status responses may not include all fields, so we preserve existing values
@@ -146,7 +154,6 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch status from device via MQTT polling."""
         import asyncio
-
         # Request status using getDevicePower and getDeviceLightness operations
         get_power_topic = TOPIC_GET_DEVICE_POWER.format(
             prefix=self.topic_prefix, device_name=self._device_name
@@ -430,18 +437,9 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         self.topic_prefix = topic_prefix
         self._attr_unique_id = f"{device_addr}_mqtt"
         self._attr_name = device_info.get("device_name", f"Hafele Light {device_addr}")
-        self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+
         device_types = device_info.get("device_types", [])
         self._is_multiwhite = any(t.lower() == "multiwhite" for t in device_types)
-
-        if self._is_multiwhite:
-            self._attr_supported_color_modes = {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP}
-            self._attr_color_mode = ColorMode.COLOR_TEMP
-            self._attr_max_color_temp_kelvin = 5000
-            self._attr_min_color_temp_kelvin = 2700
-        else:
-            self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
-            self._attr_color_mode = ColorMode.BRIGHTNESS
 
         # Store device name (use as-is, no encoding)
         device_name = device_info.get("device_name", f"device_{device_addr}")
@@ -460,6 +458,28 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             model="Local MQTT Light",
             suggested_area=location,
         )
+
+    @property
+    def min_color_temp_kelvin(self) -> int | None:
+        if self._is_multiwhite:
+            return 2700
+
+    @property
+    def max_color_temp_kelvin(self) -> int | None:
+        if self._is_multiwhite:
+            return 5000
+
+    @property
+    def color_mode(self) -> ColorMode | None:
+        if self._is_multiwhite:
+            return  ColorMode.COLOR_TEMP
+        return ColorMode.BRIGHTNESS
+
+    @property
+    def supported_color_modes(self) -> set[ColorMode] | None:
+        if self._is_multiwhite:
+         return {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP}
+        return {ColorMode.BRIGHTNESS}
 
     @property
     def is_on(self) -> bool:
@@ -501,6 +521,16 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         return False
 
     @property
+    def color_temp_kelvin(self) -> int | None:
+        """Return the color_temperature of the light."""
+        _LOGGER.debug(f"color temp is calculated for: {self}")
+        status = self.coordinator.data
+        if isinstance(status, dict):
+            temp_kelvin = status.get("temperature")
+            if temp_kelvin is not None:
+                return min(max(temp_kelvin, 2700), 5000)
+
+    @property
     def brightness(self) -> int | None:
         """Return the brightness of the light."""
         if not self.coordinator.data:
@@ -512,12 +542,11 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         status = self.coordinator.data
         if isinstance(status, dict):
             # Multiwhite color temp
-            if getattr(self, "_is_multiwhite", False):
-                temp_kelvin = status.get("temperature")
-                if temp_kelvin is not None:
-
-                    self._attr_color_temp = min(max(temp_kelvin, 2700), 5000)
-                    self._attr_color_mode = ColorMode.COLOR_TEMP
+            #if getattr(self, "_is_multiwhite", False):
+            #    temp_kelvin = status.get("temperature")
+            #    if temp_kelvin is not None:
+            #        self._attr_color_temp_kelvin = min(max(temp_kelvin, 2700), 5000)
+            #        self._attr_color_mode = ColorMode.COLOR_TEMP
             # API uses "lightness" field with 0-1 scale
             lightness = status.get("lightness")
             if lightness is not None:
@@ -575,25 +604,15 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             else:
                 self._attr_color_temp = self._attr_color_temp or 2700
 
-            payload_br = {
-                "state": "on",
-                "lightness": lightness,
-            }
-
-            topic_br = TOPIC_SET_DEVICE_LIGHTNESS.format(
-                prefix=self.topic_prefix, device_name=self._device_name
-            )
-            payload_temp = {
+            payload_ctl = {
+                "lightness" : lightness,
                 "temperature": self._attr_color_temp,
             }
-
-            topic_temp = TOPIC_SET_DEVICE_TEMPERATURE.format(
+            topic_ctl = TOPIC_SET_DEVICE_CTL.format(
                 prefix=self.topic_prefix, device_name=self._device_name
             )
 
-            await self.mqtt_client.async_publish(topic_br, payload_br, qos=1)
-
-            await self.mqtt_client.async_publish(topic_temp, payload_temp, qos=1)
+            await self.mqtt_client.async_publish(topic_ctl, payload_ctl, qos=1)
             # Optimistically update state
             if self.coordinator.data:
                 self.coordinator.data.update(

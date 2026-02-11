@@ -16,6 +16,7 @@ from .const import (
     EVENT_DEVICES_UPDATED,
     TOPIC_GET_DEVICE_LIGHTNESS,
     TOPIC_GET_DEVICE_POWER,
+    TOPIC_GET_DEVICE_CTL,
 )
 from .discovery import HafeleDiscovery
 from .mqtt_client import HafeleMQTTClient
@@ -197,10 +198,20 @@ class HafelePingButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         if self.button_type == "lightness":
-            topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                prefix=self.topic_prefix, device_name=self.device_name
-            )
-            _LOGGER.debug("Ping lightness button pressed for device %s", self.device_addr)
+            light_str = f"light.device_{self.device_addr}_mqtt"
+            state = self.hass.states.get(light_str)
+            modes = state.attributes.get("supported_color_modes", [])
+            if modes and len(modes) > 1:
+                # monocrome häfele lights only have entry
+                topic = TOPIC_GET_DEVICE_CTL.format(
+                    prefix=self.topic_prefix, device_name=self.device_name
+                )
+                _LOGGER.debug("Ping lightness button pressed for Multiwhite or RGB device %s", self.device_addr)
+            else:
+                topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                    prefix=self.topic_prefix, device_name=self.device_name
+                )
+                _LOGGER.debug("Ping lightness button pressed for Monocrhome device %s", self.device_addr)
         elif self.button_type == "power":
             topic = TOPIC_GET_DEVICE_POWER.format(
                 prefix=self.topic_prefix, device_name=self.device_name
