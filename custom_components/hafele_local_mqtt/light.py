@@ -500,6 +500,9 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
     @property
     def color_temp_kelvin(self) -> int | None:
         """Return the color_temperature of the light."""
+        if not self.coordinator.data:
+            # Return None to show unknown state until first poll completes
+            return None
         _LOGGER.debug(f"color temp is calculated for: {self}")
         status = self.coordinator.data
         if isinstance(status, dict):
