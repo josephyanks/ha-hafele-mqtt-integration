@@ -17,6 +17,7 @@ from homeassistant.components.light import (
     ATTR_COLOR_TEMP_KELVIN,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
@@ -364,9 +365,6 @@ async def async_setup_entry(
     if polling_mode == POLLING_MODE_ROTATIONAL:
         async def _rotational_polling_loop() -> None:
             """Rotational polling: poll one device every polling_interval seconds."""
-            # Wait a moment for discovery to complete
-            await asyncio.sleep(2.0)
-            
             current_index = 0
             while True:
                 # Get current list of coordinators (may change as devices are discovered)
@@ -391,8 +389,14 @@ async def async_setup_entry(
                 # Wait before polling next device
                 await asyncio.sleep(polling_interval)
         
-        # Start rotational polling task
-        hass.async_create_task(_rotational_polling_loop())
+        # Don't start rotational polling task here - otherwise HA will wait/block some minutes
+        # hass.async_create_task(_rotational_polling_loop())
+        # Start polling only if HA complete started, the async_setup_entry will exit clean for
+        # quick startup
+        @callback
+        def _start_rotational_polling(event):
+            hass.async_create_task(_rotational_polling_loop())
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start_rotational_polling)
         _LOGGER.info("Rotational polling mode enabled - polling one device at a time")
     else:
         _LOGGER.info("Normal polling mode enabled - each device polls independently")
