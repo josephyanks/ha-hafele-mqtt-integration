@@ -1,0 +1,40 @@
+# Cursor Rules for Hafele Local MQTT Integration
+
+For comprehensive information about this repository, API operations, and implementation details, see `AI_AGENT_README.md`.
+
+## Quick Context
+
+This is a Home Assistant custom integration for controlling Hafele LED lights via MQTT. Key points:
+
+- **Domain**: `hafele_local_mqtt`
+- **API**: Uses Hafele MQTT API v0.2.0 (see `API_OPERATIONS.md` for full reference)
+- **Gateway Required**: Needs "Gateway, Häfele Connect Mesh" device
+- **MQTT Topics**: Format is `{gateway_topic}/lights/{device_name}/{operation}` (default prefix: "hafele")
+
+## Critical API Notes
+
+1. **Operation IDs are documentation-only** - Never use them in topic names
+2. **Power state inconsistency**: 
+   - Commands: `"onOff": "on"` or `"off"` (camelCase, string)
+   - lightStatus: `"onoff": 1` or `0` (lowercase, numeric)
+   - groupStatus: `"onOff": "on"` or `"off"` (camelCase, string)
+3. **Temperature control**: `setDeviceTemperature` doesn't work for single lights - use `setDeviceCtl` instead
+4. **Device names**: May need URL encoding in topic paths if they contain spaces
+5. **Status polling required**: Devices don't auto-publish updates
+
+## Code Structure
+
+- `const.py`: All MQTT topic templates and constants
+- `mqtt_client.py`: MQTT client wrapper (supports HA MQTT or external broker)
+- `discovery.py`: Handles device/group/scene discovery from MQTT
+- `light.py`: Light platform with polling coordinator
+- `button.py`: Button platform for scene activation
+
+## When Making Changes
+
+- Always use topic templates from `const.py` with proper formatting
+- Handle both numeric and string power state formats
+- Use `ctl` operations for single light temperature control
+- Remember devices require polling - no push updates
+- Check `AI_AGENT_README.md` for detailed API operation reference
+
