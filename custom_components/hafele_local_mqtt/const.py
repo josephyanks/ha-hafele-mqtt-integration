@@ -11,8 +11,8 @@ TOPIC_GROUPS = "groups"
 TOPIC_SCENES = "scenes"
 
 # Polling Configuration
-DEFAULT_POLLING_INTERVAL = 60  # seconds
-DEFAULT_POLLING_TIMEOUT = 5  # seconds
+DEFAULT_POLLING_INTERVAL = 30  # seconds
+DEFAULT_POLLING_TIMEOUT = 3  # seconds
 
 # MQTT Topic Patterns - Verified against API documentation
 # Reference: https://help.connect-mesh.io/mqtt/index.html

@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, DEFAULT_POLLING_MODE, CONF_POLLING_MODE
+from .const import DOMAIN, DEFAULT_POLLING_MODE, CONF_POLLING_MODE, DEFAULT_POLLING_INTERVAL, DEFAULT_POLLING_TIMEOUT
 from .mqtt_client import HafeleMQTTClient
 from .discovery import HafeleDiscovery
 
@@ -22,8 +22,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Get configuration
     topic_prefix = entry.data.get("topic_prefix", "hafele")
-    polling_interval = entry.data.get("polling_interval", 60)
-    polling_timeout = entry.data.get("polling_timeout", 5)
+    polling_interval = entry.data.get("polling_interval", DEFAULT_POLLING_INTERVAL)
+    polling_timeout = entry.data.get("polling_timeout", DEFAULT_POLLING_TIMEOUT)
     polling_mode = entry.data.get(CONF_POLLING_MODE, DEFAULT_POLLING_MODE)
     
     # Get MQTT broker configuration

@@ -48,7 +48,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_TOPIC_PREFIX, default=DEFAULT_TOPIC_PREFIX): str,
         vol.Optional(
             CONF_POLLING_INTERVAL, default=DEFAULT_POLLING_INTERVAL
-        ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+        ): vol.All(vol.Coerce(int), vol.Range(min=2, max=300)),
         vol.Optional(
             CONF_POLLING_TIMEOUT, default=DEFAULT_POLLING_TIMEOUT
         ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
