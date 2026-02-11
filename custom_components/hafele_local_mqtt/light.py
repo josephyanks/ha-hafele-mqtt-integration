@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import math
@@ -36,6 +37,7 @@ from .const import (
     TOPIC_SET_DEVICE_LIGHTNESS,
     TOPIC_SET_DEVICE_POWER,
     TOPIC_DEVICE_STATUS,
+    DEFAULT_POLLING_MODE,
     POLLING_MODE_NORMAL,
     POLLING_MODE_ROTATIONAL,
 )
@@ -113,7 +115,11 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         """Clean up subscriptions."""
         for unsub in self._unsubscribers:
             if callable(unsub):
-                unsub()
+                # Handle both sync and async unsubscribe functions
+                if inspect.iscoroutinefunction(unsub):
+                    await unsub()
+                else:
+                    unsub()
         self._unsubscribers.clear()
         await super()._async_shutdown()
 
@@ -164,7 +170,6 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch status from device via MQTT polling."""
-        import asyncio
         # Request status using getDeviceLightness operation only
         # Power state is inferred from lightness (lightness > 0 = on)
         get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
@@ -217,7 +222,7 @@ async def async_setup_entry(
     topic_prefix = data["topic_prefix"]
     polling_interval = data["polling_interval"]
     polling_timeout = data["polling_timeout"]
-    polling_mode = data.get("polling_mode", POLLING_MODE_ROTATIONAL)
+    polling_mode = data.get("polling_mode", DEFAULT_POLLING_MODE)
 
     # Track which entities we've already created in this session
     created_entities: set[int] = set()
@@ -431,16 +436,18 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
     def min_color_temp_kelvin(self) -> int | None:
         if self._is_multiwhite:
             return 2700
+        return None
 
     @property
     def max_color_temp_kelvin(self) -> int | None:
         if self._is_multiwhite:
             return 5000
+        return None
 
     @property
     def color_mode(self) -> ColorMode | None:
         if self._is_multiwhite:
-            return  ColorMode.COLOR_TEMP
+            return ColorMode.COLOR_TEMP
         return ColorMode.BRIGHTNESS
 
     @property
@@ -487,7 +494,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                     return bool(state)
                 return state in ("on", "ON", True, 1, "1")
 
-        return False
+        # Return None for unknown state (no valid data found)
+        return None
 
     @property
     def color_temp_kelvin(self) -> int | None:
@@ -596,12 +604,6 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                     "lightness": lightness,
                     "temperature": self._attr_color_temp,
                 }
-            # Optimistic state update
-            self.coordinator.data = {
-                "onoff": 1,
-                "lightness": lightness,
-                "temperature": self._attr_color_temp,
-            }
 
             self._attr_color_mode = ColorMode.COLOR_TEMP
             self.async_write_ha_state()
