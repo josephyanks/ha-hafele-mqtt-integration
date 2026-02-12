@@ -71,6 +71,7 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         self._status_data: dict[str, Any] = {}
         self._status_received = False
         self._unsubscribers: list = []
+        self.entity: HafeleLightEntity | None = None  # HaefeleLightEntity
 
         # Subscribe to device-specific status topic (use device name as-is, no encoding)
         status_topic = TOPIC_DEVICE_STATUS.format(
@@ -302,9 +303,7 @@ async def async_setup_entry(
             # Set up subscriptions to device status topic
             await coordinator._async_setup_subscriptions()
             
-            # Store coordinator reference for startup status tracking
-            coordinators[device_addr] = coordinator
-            
+
             # Start individual coordinator polling
             # Use async_request_refresh instead of async_config_entry_first_refresh
             # since we don't have a config entry reference in the coordinator
@@ -316,7 +315,11 @@ async def async_setup_entry(
             entity = HafeleLightEntity(
                 coordinator, device_addr, device_info, mqtt_client, topic_prefix
             )
-            
+
+            # Store coordinator reference for startup status tracking
+            coordinator.entity = entity
+            coordinators[device_addr] = coordinator
+
             new_entities.append(entity)
             created_entities.add(device_addr)
 
@@ -364,31 +367,71 @@ async def async_setup_entry(
     # Normal mode uses per-device automatic polling via update_interval
     if polling_mode == POLLING_MODE_ROTATIONAL:
         async def _rotational_polling_loop() -> None:
-            """Rotational polling: poll one device every polling_interval seconds."""
-            current_index = 0
+            """Rotational Polling with Fine-Grained PollPriority and sleep after each update.
+                - Update all HIGH priority entities first, one by one, sleeping after each update
+                - Normal priority entities are updated round-robin, sleeping after each update
+                - After each update, lists are rebuilt to catch new HIGH priorities
+            """
+            rr_index = 0  # Round-Robin index for normal entities
+            _LOGGER.debug("Starting rational polling loop")
+            await hass.async_block_till_done() # otherwise startup of HA is blocked
+            _LOGGER.info("Homeassistant started - we start polling")
             while True:
-                # Get current list of coordinators (may change as devices are discovered)
-                current_coordinators = list(coordinators.values())
-                
-                if current_coordinators:
-                    # Poll the next device in rotation
-                    coordinator = current_coordinators[current_index % len(current_coordinators)]
-                    _LOGGER.debug(
-                        "Rotational poll: requesting status for device %s (name: %s)",
-                        coordinator.device_addr,
-                        coordinator.device_name,
-                    )
-                    await coordinator.async_request_refresh()
-                    
-                    # Move to next device
-                    current_index += 1
-                else:
-                    # No devices yet, wait a bit longer
-                    await asyncio.sleep(1.0)
-                
-                # Wait before polling next device
-                await asyncio.sleep(polling_interval)
-        
+                try:
+                    high_priority_entities = []
+                    normal_entities = []
+
+                    # Single pass: collect entities and split by priority
+                    for c in coordinators.values():
+                        entity = c.entity
+                        if entity is None:
+                            continue
+                        if entity.priority == PollPriority.HIGH:
+                            high_priority_entities.append(entity)
+                        else:
+                            normal_entities.append(entity)
+                    if not high_priority_entities and not normal_entities:
+                        _LOGGER.warning("No entities found to poll")
+                        await asyncio.sleep(polling_interval)
+                        continue
+                    # Update HIGH priority entities first
+                    for entity in high_priority_entities:
+                        try:
+                            _LOGGER.debug(
+                                "Updating HIGH priority entity: %s (%s)",
+                                entity._device_name,
+                                entity.device_addr,
+                            )
+                            await entity.coordinator.async_request_refresh()
+                            entity.reset_priority()  # Optional: reset priority after update
+                        except Exception as e:
+                            _LOGGER.exception(
+                                "Error updating HIGH priority entity %s: %s",
+                                entity._device_name, e,
+                            )
+                        await asyncio.sleep(polling_interval)
+                    # Round-robin for normal entities if no high-priority entities
+                    if normal_entities and not high_priority_entities:
+                        entity = normal_entities[rr_index % len(normal_entities)]
+                        try:
+                            _LOGGER.debug(
+                                "Updating NORMAL priority entity: %s (%s)",
+                                entity._device_name,
+                                entity.device_addr,
+                            )
+                            await entity.coordinator.async_request_refresh()
+                            rr_index += 1
+                        except Exception as e:
+                            _LOGGER.exception(
+                                "Error updating normal entity %s: %s",
+                                entity._device_name, e,
+                            )
+                        await asyncio.sleep(polling_interval)
+
+                except Exception as cycle_error:
+                    _LOGGER.exception(f"Critical error in polling cycle: {cycle_error}")
+                    await asyncio.sleep(polling_interval)
+
         # Don't start rotational polling task here - otherwise HA will wait/block some minutes
         # hass.async_create_task(_rotational_polling_loop())
         # Start polling only if HA complete started, the async_setup_entry will exit clean for
@@ -401,7 +444,10 @@ async def async_setup_entry(
     else:
         _LOGGER.info("Normal polling mode enabled - each device polls independently")
 
-
+class PollPriority:
+    """Polling Update Priority, the lower the priority, the faster it gets updadatet"""
+    NORMAL = 5  # default priority
+    HIGH = 1    # high priority = updated first
 
 class HafeleLightEntity(CoordinatorEntity, LightEntity):
     """Representation of a Hafele light."""
@@ -433,6 +479,8 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         # Store last known lightness value (0-1 scale, as used by API)
         self._last_known_lightness: float | None = None
 
+        self._priority = PollPriority.NORMAL  # update priority for rational polling
+
         # Device info
         location = device_info.get("location", "Unknown")
 
@@ -443,6 +491,23 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             model="Local MQTT Light",
             suggested_area=location,
         )
+
+    @property
+    def priority(self) -> int:
+        """Return current priority of this entity"""
+        return self._priority
+
+    def set_high_priority(self):
+        """Set this entity to high priority.
+        Async-safe: simple assignment in single-threaded HA event loop.
+        """
+        self._priority = PollPriority.HIGH
+
+    def reset_priority(self):
+        """Reset priority to NORMAL.
+        Async-safe: simple assignment in HA event loop.
+        """
+        self._priority = PollPriority.NORMAL
 
     @property
     def min_color_temp_kelvin(self) -> int | None:
@@ -578,6 +643,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
+        _LOGGER.info(f"{self} turned on")
         # --- MULTIWHITE ---
         if self._is_multiwhite:
             # Brightness
@@ -622,6 +688,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
             self._attr_color_mode = ColorMode.COLOR_TEMP
             self.async_write_ha_state()
+            self.set_high_priority()  # Todo: maybe set this after the ramp -> wait 3 secs
             return
 
         # --- Monochrome ---
@@ -660,17 +727,6 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                 self.coordinator.data.update({"onoff": 1, "lightness": lightness_value})
             else:
                 self.coordinator.data = {"onoff": 1, "lightness": lightness_value}
-            
-            # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
-            async def _request_lightness_after_ramp() -> None:
-                await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-                get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                    prefix=self.topic_prefix, device_name=self._device_name
-                )
-                await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-            
-            hass = self.coordinator.hass
-            hass.async_create_task(_request_lightness_after_ramp())
         else:
             # No brightness specified - use last known lightness if available
             if self._last_known_lightness is not None:
@@ -693,17 +749,6 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                     self.coordinator.data.update({"onoff": 1, "lightness": lightness_value})
                 else:
                     self.coordinator.data = {"onoff": 1, "lightness": lightness_value}
-                
-                # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
-                async def _request_lightness_after_ramp() -> None:
-                    await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-                    get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                        prefix=self.topic_prefix, device_name=self._device_name
-                    )
-                    await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-                
-                hass = self.coordinator.hass
-                hass.async_create_task(_request_lightness_after_ramp())
             else:
                 # No last known lightness - just turn on without setting brightness
                 await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
@@ -713,20 +758,22 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                     self.coordinator.data.update({"onoff": 1})
                 else:
                     self.coordinator.data = {"onoff": 1}
-                
-                # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
-                # Power state is inferred from lightness, so no need to poll power separately
-                async def _request_lightness_after_ramp() -> None:
-                    await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-                    get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                        prefix=self.topic_prefix, device_name=self._device_name
-                    )
-                    await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-                
-                hass = self.coordinator.hass
-                hass.async_create_task(_request_lightness_after_ramp())
+
+            # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
+            # Power state is inferred from lightness, so no need to poll power separately
+            async def _request_lightness_after_ramp() -> None:
+                await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
+                if self.coordinator.poll
+                get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                    prefix=self.topic_prefix, device_name=self._device_name
+                )
+                await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+
+            hass = self.coordinator.hass
+            hass.async_create_task(_request_lightness_after_ramp())
 
         self.async_write_ha_state()
+        self.set_high_priority()  # Todo: maybe set this after the ramp -> wait 3 secs
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
@@ -759,3 +806,4 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         hass = self.coordinator.hass
         hass.async_create_task(_request_lightness_after_ramp())
+        self.set_high_priority()  # Todo: maybe set this after the ramp -> wait 3 secs
