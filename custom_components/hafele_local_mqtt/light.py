@@ -33,6 +33,7 @@ from .const import (
     TOPIC_GET_DEVICE_LIGHTNESS,
     TOPIC_GET_DEVICE_POWER,
     TOPIC_SET_DEVICE_CTL,
+    TOPIC_GET_DEVICE_CTL,
     TOPIC_GET_GROUP_LIGHTNESS,
     TOPIC_GET_GROUP_POWER,
     TOPIC_SET_DEVICE_LIGHTNESS,
@@ -68,6 +69,7 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         self.device_name = device_name
         self.topic_prefix = topic_prefix
         self.polling_timeout = polling_timeout
+        self.polling_mode = polling_mode
         self._status_data: dict[str, Any] = {}
         self._status_received = False
         self._unsubscribers: list = []
@@ -176,15 +178,19 @@ class HafeleLightCoordinator(DataUpdateCoordinator):
         """Fetch status from device via MQTT polling."""
         # Request status using getDeviceLightness operation only
         # Power state is inferred from lightness (lightness > 0 = on)
-        get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-            prefix=self.topic_prefix, device_name=self._device_name
-        )
+        if self.entity and self.entity.is_multiwhite:
+            _type = "Multiwhite"
+            get_lightness_topic = TOPIC_GET_DEVICE_CTL.format(
+                prefix=self.topic_prefix, device_name=self._device_name
+            )
+        else:
+            _type = "Monochrome"
+            get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
+                prefix=self.topic_prefix, device_name=self._device_name
+            )
         _LOGGER.debug(
-            "Requesting lightness status for device %s (name: %s) on topic: %s",
-            self.device_addr,
-            self.device_name,
-            get_lightness_topic,
-        )
+            "Requesting lightness status for %s device %s (name: %s) on topic: %s", _type,
+            self.device_addr, self.device_name, get_lightness_topic)
 
         # Reset status received flag
         self._status_received = False
@@ -399,7 +405,7 @@ async def async_setup_entry(
                         try:
                             _LOGGER.debug(
                                 "Updating HIGH priority entity: %s (%s)",
-                                entity._device_name,
+                                entity.device_name,
                                 entity.device_addr,
                             )
                             await entity.coordinator.async_request_refresh()
@@ -407,7 +413,7 @@ async def async_setup_entry(
                         except Exception as e:
                             _LOGGER.exception(
                                 "Error updating HIGH priority entity %s: %s",
-                                entity._device_name, e,
+                                entity.device_name, e,
                             )
                         await asyncio.sleep(polling_interval)
                     # Round-robin for normal entities if no high-priority entities
@@ -416,7 +422,7 @@ async def async_setup_entry(
                         try:
                             _LOGGER.debug(
                                 "Updating NORMAL priority entity: %s (%s)",
-                                entity._device_name,
+                                entity.device_name,
                                 entity.device_addr,
                             )
                             await entity.coordinator.async_request_refresh()
@@ -424,7 +430,7 @@ async def async_setup_entry(
                         except Exception as e:
                             _LOGGER.exception(
                                 "Error updating normal entity %s: %s",
-                                entity._device_name, e,
+                                entity.device_name, e,
                             )
                         await asyncio.sleep(polling_interval)
 
@@ -491,6 +497,13 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             model="Local MQTT Light",
             suggested_area=location,
         )
+    @property
+    def device_name(self) -> str:
+        return self._device_name
+
+    @property
+    def is_multiwhite(self) -> bool:
+        return self._is_multiwhite
 
     @property
     def priority(self) -> int:
@@ -580,7 +593,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         if not self.coordinator.data:
             # Return None to show unknown state until first poll completes
             return None
-        _LOGGER.debug(f"color temp is calculated for: {self}")
+        #_LOGGER.debug(f"color temp is calculated for: {self}")
         status = self.coordinator.data
         if isinstance(status, dict):
             temp_kelvin = status.get("temperature")
@@ -638,14 +651,13 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         # If we have last known lightness, return that (even when off)
         if self._last_known_lightness is not None:
             return int(self._last_known_lightness * 255)
-        
         return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        _LOGGER.info(f"{self} turned on")
         # --- MULTIWHITE ---
         if self._is_multiwhite:
+            _LOGGER.info(f"Multiwhite {self} turned on")
             # Brightness
             if ATTR_BRIGHTNESS in kwargs:
                 brightness = kwargs[ATTR_BRIGHTNESS]
@@ -688,9 +700,10 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
             self._attr_color_mode = ColorMode.COLOR_TEMP
             self.async_write_ha_state()
-            self.set_high_priority()  # Todo: maybe set this after the ramp -> wait 3 secs
+            self.coordinator.hass.async_create_task(self.force_manual_update())
             return
 
+        _LOGGER.info(f"Monochrome {self} turned on")
         # --- Monochrome ---
         # Use device-specific topic: {gateway_topic}/lights/{device_name}/power
         power_topic = TOPIC_SET_DEVICE_POWER.format(
@@ -713,6 +726,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             self._last_known_lightness = lightness_value
 
             # Set power first
+            # Todo: check if setting the brightness is enough - auto turn on if lightness > 0 ??
             await self.mqtt_client.async_publish(power_topic, power_command, qos=1)
 
             # Then set brightness using device-specific lightness topic
@@ -759,21 +773,35 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                 else:
                     self.coordinator.data = {"onoff": 1}
 
+        self.async_write_ha_state()
+        self.coordinator.hass.async_create_task(self.force_manual_update())
+
+    async def force_manual_update(self) -> None:
+        """
+        After a change - try requesting actual value either per forced mqtt update or via PollPriority
+        :return:
+        """
+        await asyncio.sleep(1.0)
+        # next polling cycle is >3s (this 1s + 2s Relationpolling min cycle)
+        self.set_high_priority()
+        if self.coordinator.polling_mode == POLLING_MODE_NORMAL:
             # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
             # Power state is inferred from lightness, so no need to poll power separately
-            async def _request_lightness_after_ramp() -> None:
-                await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-                if self.coordinator.poll
+            await asyncio.sleep(4.0)  # Wait 5 seconds for ramping to complete
+            if self._is_multiwhite:
+                _type = "Multiwhite"
+                get_lightness_topic = TOPIC_GET_DEVICE_CTL.format(
+                    prefix=self.topic_prefix, device_name=self._device_name
+                )
+            else:
+                _type = "Monochrome"
                 get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
                     prefix=self.topic_prefix, device_name=self._device_name
                 )
-                await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-
-            hass = self.coordinator.hass
-            hass.async_create_task(_request_lightness_after_ramp())
-
-        self.async_write_ha_state()
-        self.set_high_priority()  # Todo: maybe set this after the ramp -> wait 3 secs
+            _LOGGER.info(f"requesting manual update for {_type} {self._device_name} with Normal Polling")
+            await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
+        else:
+            _LOGGER.info(f"requesting manual update for {self._device_name} via RationalPolling")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
@@ -794,16 +822,4 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             self.coordinator.data = {"onoff": 0}
 
         self.async_write_ha_state()
-
-        # Schedule a lightnessGet request 5 seconds after setting to get final value after ramping
-        # Power state is inferred from lightness, so no need to poll power separately
-        async def _request_lightness_after_ramp() -> None:
-            await asyncio.sleep(5.0)  # Wait 5 seconds for ramping to complete
-            get_lightness_topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
-                prefix=self.topic_prefix, device_name=self._device_name
-            )
-            await self.mqtt_client.async_publish(get_lightness_topic, {}, qos=1)
-
-        hass = self.coordinator.hass
-        hass.async_create_task(_request_lightness_after_ramp())
-        self.set_high_priority()  # Todo: maybe set this after the ramp -> wait 3 secs
+        self.coordinator.hass.async_create_task(self.force_manual_update())
