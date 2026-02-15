@@ -416,8 +416,8 @@ async def async_setup_entry(
                                 entity.device_name, e,
                             )
                         await asyncio.sleep(polling_interval)
-                    # Round-robin for normal entities if no high-priority entities
-                    if normal_entities and not high_priority_entities:
+                    # Round-robin for normal entities (after processing high-priority entities)
+                    if normal_entities:
                         entity = normal_entities[rr_index % len(normal_entities)]
                         try:
                             _LOGGER.debug(
