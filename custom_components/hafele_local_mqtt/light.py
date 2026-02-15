@@ -455,6 +455,54 @@ class PollPriority:
     NORMAL = 5  # default priority
     HIGH = 1    # high priority = updated first
 
+
+async def run_one_rotational_polling_cycle(
+    coordinators: dict[int, "HafeleLightCoordinator"],
+    rr_index: int,
+    polling_interval: int,
+) -> int:
+    """Run one cycle of rotational polling: HIGH priority entities first, then one NORMAL (round-robin).
+    Returns the updated rr_index for the next cycle.
+    Used by the rotational polling loop and by tests.
+    """
+    high_priority_entities: list[HafeleLightEntity] = []
+    normal_entities: list[HafeleLightEntity] = []
+    for c in coordinators.values():
+        entity = c.entity
+        if entity is None:
+            continue
+        if entity.priority == PollPriority.HIGH:
+            high_priority_entities.append(entity)
+        else:
+            normal_entities.append(entity)
+    if not high_priority_entities and not normal_entities:
+        await asyncio.sleep(polling_interval)
+        return rr_index
+    for entity in high_priority_entities:
+        try:
+            await entity.coordinator.async_request_refresh()
+            entity.reset_priority()
+        except Exception as e:
+            _LOGGER.exception(
+                "Error updating HIGH priority entity %s: %s",
+                entity.device_name, e,
+            )
+        await asyncio.sleep(polling_interval)
+    # Round-robin for normal entities (after processing high-priority entities)
+    if normal_entities:
+        entity = normal_entities[rr_index % len(normal_entities)]
+        try:
+            await entity.coordinator.async_request_refresh()
+            rr_index += 1
+        except Exception as e:
+            _LOGGER.exception(
+                "Error updating normal entity %s: %s",
+                entity.device_name, e,
+            )
+        await asyncio.sleep(polling_interval)
+    return rr_index
+
+
 class HafeleLightEntity(CoordinatorEntity, LightEntity):
     """Representation of a Hafele light."""
 

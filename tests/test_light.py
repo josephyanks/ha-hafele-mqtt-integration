@@ -8,6 +8,7 @@ from custom_components.hafele_local_mqtt.light import (
     HafeleLightEntity,
     HafeleLightCoordinator,
     PollPriority,
+    run_one_rotational_polling_cycle,
 )
 from custom_components.hafele_local_mqtt.const import (
     POLLING_MODE_NORMAL,
@@ -295,3 +296,55 @@ async def test_coordinator_update_data_timeout(mock_hass, mock_mqtt_client):
     
     # Should return old data on timeout
     assert result == {"lightness": 0.3}
+
+
+@pytest.mark.asyncio
+async def test_rotational_polling_high_and_normal_entities_both_polled():
+    """When both HIGH and NORMAL priority entities exist, both are polled in one cycle.
+    Regression test for fix: normal entities must be polled even when high_priority_entities exist.
+    """
+    # One HIGH, two NORMAL entities
+    high_co = MagicMock(spec=HafeleLightCoordinator)
+    high_co.async_request_refresh = AsyncMock()
+    high_entity = MagicMock()
+    high_entity.priority = PollPriority.HIGH
+    high_entity.device_name = "high_light"
+    high_entity.coordinator = high_co
+    high_entity.reset_priority = MagicMock()
+    high_co.entity = high_entity
+
+    normal_co1 = MagicMock(spec=HafeleLightCoordinator)
+    normal_co1.async_request_refresh = AsyncMock()
+    normal_entity1 = MagicMock()
+    normal_entity1.priority = PollPriority.NORMAL
+    normal_entity1.device_name = "normal_1"
+    normal_entity1.coordinator = normal_co1
+    normal_co1.entity = normal_entity1
+
+    normal_co2 = MagicMock(spec=HafeleLightCoordinator)
+    normal_co2.async_request_refresh = AsyncMock()
+    normal_entity2 = MagicMock()
+    normal_entity2.priority = PollPriority.NORMAL
+    normal_entity2.device_name = "normal_2"
+    normal_entity2.coordinator = normal_co2
+    normal_co2.entity = normal_entity2
+
+    coordinators = {1: high_co, 2: normal_co1, 3: normal_co2}
+    rr_index = 0
+    polling_interval = 1
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        new_rr_index = await run_one_rotational_polling_cycle(
+            coordinators, rr_index, polling_interval
+        )
+
+    # HIGH entity was refreshed and reset
+    high_co.async_request_refresh.assert_called_once()
+    high_entity.reset_priority.assert_called_once()
+
+    # Exactly one NORMAL entity was refreshed (round-robin at index 0 -> first normal)
+    normal_co1.async_request_refresh.assert_called_once()
+    normal_co2.async_request_refresh.assert_not_called()
+
+    # Round-robin index advanced by 1
+    assert new_rr_index == 1
