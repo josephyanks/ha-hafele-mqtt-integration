@@ -198,20 +198,25 @@ class HafelePingButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         if self.button_type == "lightness":
-            light_str = f"light.device_{self.device_addr}_mqtt"
-            state = self.hass.states.get(light_str)
-            modes = state.attributes.get("supported_color_modes", [])
-            if modes and len(modes) > 1:
-                # monocrome häfele lights only have entry
+            # Check if device is multiwhite/RGB by checking device_info
+            device_types = self.device_info.get("device_types", [])
+            is_multiwhite = any(
+                isinstance(dt, str) and dt.lower() in ("multiwhite", "rgb")
+                for dt in device_types
+            )
+            
+            if is_multiwhite:
+                # Multiwhite/RGB devices use CTL topic
                 topic = TOPIC_GET_DEVICE_CTL.format(
                     prefix=self.topic_prefix, device_name=self.device_name
                 )
                 _LOGGER.debug("Ping lightness button pressed for Multiwhite or RGB device %s", self.device_addr)
             else:
+                # Monochrome devices use lightness topic
                 topic = TOPIC_GET_DEVICE_LIGHTNESS.format(
                     prefix=self.topic_prefix, device_name=self.device_name
                 )
-                _LOGGER.debug("Ping lightness button pressed for Monocrhome device %s", self.device_addr)
+                _LOGGER.debug("Ping lightness button pressed for Monochrome device %s", self.device_addr)
         elif self.button_type == "power":
             topic = TOPIC_GET_DEVICE_POWER.format(
                 prefix=self.topic_prefix, device_name=self.device_name

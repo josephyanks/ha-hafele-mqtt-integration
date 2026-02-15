@@ -1,6 +1,7 @@
 """Device discovery for Hafele Local MQTT."""
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any, Callable
@@ -59,7 +60,11 @@ class HafeleDiscovery:
         """Stop discovery."""
         for unsub in self._unsubscribers:
             if callable(unsub):
-                unsub()
+                # Handle both sync and async unsubscribe functions
+                if inspect.iscoroutinefunction(unsub):
+                    await unsub()
+                else:
+                    unsub()
         self._unsubscribers.clear()
         _LOGGER.info("Stopped Hafele device discovery")
 

@@ -11,17 +11,17 @@ TOPIC_GROUPS = "groups"
 TOPIC_SCENES = "scenes"
 
 # Polling Configuration
-DEFAULT_POLLING_INTERVAL = 60  # seconds
-DEFAULT_POLLING_TIMEOUT = 5  # seconds
+DEFAULT_POLLING_INTERVAL = 30  # seconds
+DEFAULT_POLLING_TIMEOUT = 3  # seconds
 
 # MQTT Topic Patterns - Verified against API documentation
 # Reference: https://help.connect-mesh.io/mqtt/index.html
 
 # Discovery topics (RECEIVE - Subscribe)
 # API: RECEIVE lightsDiscovery, groupDiscovery, sceneDiscovery
-TOPIC_DISCOVERY_LIGHTS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_LIGHTS}"  # {gateway_topic}/lights
-TOPIC_DISCOVERY_GROUPS = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_GROUPS}"  # {gateway_topic}/groups
-TOPIC_DISCOVERY_SCENES = f"{DEFAULT_TOPIC_PREFIX}/{TOPIC_SCENES}"  # {gateway_topic}/scenes
+TOPIC_DISCOVERY_LIGHTS = f"{{prefix}}/{TOPIC_LIGHTS}"  # {gateway_topic}/lights
+TOPIC_DISCOVERY_GROUPS = f"{{prefix}}/{TOPIC_GROUPS}"  # {gateway_topic}/groups
+TOPIC_DISCOVERY_SCENES = f"{{prefix}}/{TOPIC_SCENES}"  # {gateway_topic}/scenes
 
 # Control topics (SEND - Publish)
 # Note: Operation IDs (like setDevicePower, getDevicePower) are for API lookup only, not used in topics
@@ -51,8 +51,14 @@ TOPIC_GROUP_STATUS = "{prefix}/groups/{group_name}/status"  # groupStatus (Opera
 CONF_TOPIC_PREFIX = "topic_prefix"
 CONF_POLLING_INTERVAL = "polling_interval"
 CONF_POLLING_TIMEOUT = "polling_timeout"
+CONF_POLLING_MODE = "polling_mode"
 CONF_ENABLE_GROUPS = "enable_groups"
 CONF_ENABLE_SCENES = "enable_scenes"
+
+# Polling modes
+POLLING_MODE_NORMAL = "normal"  # Each device polls independently
+POLLING_MODE_ROTATIONAL = "rotational"  # One device at a time in rotation - use at big networks (>5 lights)
+DEFAULT_POLLING_MODE = POLLING_MODE_NORMAL
 
 # MQTT Broker Configuration (optional - uses HA MQTT if not provided)
 CONF_MQTT_BROKER = "mqtt_broker"
