@@ -374,9 +374,9 @@ async def async_setup_entry(
     if polling_mode == POLLING_MODE_ROTATIONAL:
         async def _rotational_polling_loop() -> None:
             """Rotational Polling with Fine-Grained PollPriority and sleep after each update.
-                - Update all HIGH priority entities first, one by one, sleeping after each update
-                - Normal priority entities are updated round-robin, sleeping after each update
-                - After each update, lists are rebuilt to catch new HIGH priorities
+                Each iteration finds and polls one entity:
+                - If any HIGH priority entity exists, poll the first one found (and reset it)
+                - Else, poll the next normal entity via round-robin (rr_index)
             """
             rr_index = 0  # Round-Robin index for normal entities
             _LOGGER.debug("Starting rational polling loop")
@@ -384,42 +384,40 @@ async def async_setup_entry(
             _LOGGER.info("Homeassistant started - we start polling")
             while True:
                 try:
-                    high_priority_entities = []
+                    entity = None
+                    is_high = False
                     normal_entities = []
 
-                    # Single pass: collect entities and split by priority
+                    # Single pass: find first high-priority, or collect normals for round-robin
                     for c in coordinators.values():
-                        entity = c.entity
-                        if entity is None:
+                        e = c.entity
+                        if e is None:
                             continue
-                        if entity.priority == PollPriority.HIGH:
-                            high_priority_entities.append(entity)
-                        else:
-                            normal_entities.append(entity)
-                    if not high_priority_entities and not normal_entities:
+                        if e.priority == PollPriority.HIGH:
+                            entity = e
+                            is_high = True
+                            break
+                        normal_entities.append(e)
+
+                    if entity is None and normal_entities:
+                        entity = normal_entities[rr_index % len(normal_entities)]
+
+                    if entity is None:
                         _LOGGER.warning("No entities found to poll")
                         await asyncio.sleep(polling_interval)
                         continue
-                    # Update HIGH priority entities first
-                    for entity in high_priority_entities:
-                        try:
+
+                    # Poll the chosen entity
+                    try:
+                        if is_high:
                             _LOGGER.debug(
                                 "Updating HIGH priority entity: %s (%s)",
                                 entity.device_name,
                                 entity.device_addr,
                             )
                             await entity.coordinator.async_request_refresh()
-                            entity.reset_priority()  # Optional: reset priority after update
-                        except Exception as e:
-                            _LOGGER.exception(
-                                "Error updating HIGH priority entity %s: %s",
-                                entity.device_name, e,
-                            )
-                        await asyncio.sleep(polling_interval)
-                    # Round-robin for normal entities if no high-priority entities
-                    if normal_entities and not high_priority_entities:
-                        entity = normal_entities[rr_index % len(normal_entities)]
-                        try:
+                            entity.reset_priority()
+                        else:
                             _LOGGER.debug(
                                 "Updating NORMAL priority entity: %s (%s)",
                                 entity.device_name,
@@ -427,12 +425,14 @@ async def async_setup_entry(
                             )
                             await entity.coordinator.async_request_refresh()
                             rr_index += 1
-                        except Exception as e:
-                            _LOGGER.exception(
-                                "Error updating normal entity %s: %s",
-                                entity.device_name, e,
-                            )
-                        await asyncio.sleep(polling_interval)
+                    except Exception as e:
+                        _LOGGER.exception(
+                            "Error updating %s entity %s: %s",
+                            "HIGH" if is_high else "normal",
+                            entity.device_name,
+                            e,
+                        )
+                    await asyncio.sleep(polling_interval)
 
                 except Exception as cycle_error:
                     _LOGGER.exception(f"Critical error in polling cycle: {cycle_error}")
