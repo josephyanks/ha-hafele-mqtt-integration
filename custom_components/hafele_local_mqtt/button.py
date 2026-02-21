@@ -164,6 +164,8 @@ async def async_setup_entry(
 class HafelePingButton(ButtonEntity):
     """Representation of a Hafele ping button."""
 
+    _attr_entity_registry_enabled_default = False
+
     def __init__(
         self,
         mqtt_client: HafeleMQTTClient,
