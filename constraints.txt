@@ -1,0 +1,3 @@
+# Optional: use this to install lru-dict 1.4.1 alone on Python 3.14 (e.g. for other projects).
+# For Home Assistant, use Python 3.11 or 3.12 instead; see INSTALL_TROUBLESHOOTING.md.
+lru-dict==1.4.1
