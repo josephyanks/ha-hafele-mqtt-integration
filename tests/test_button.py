@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.hafele_local_mqtt.button import HafelePingButton
+from custom_components.hafele_local_mqtt.debugbutton import HafelePingButton
 from custom_components.hafele_local_mqtt.const import (
     TOPIC_GET_DEVICE_LIGHTNESS,
     TOPIC_GET_DEVICE_POWER,
@@ -93,3 +93,23 @@ async def test_button_press_power(mock_mqtt_client):
     mock_mqtt_client.async_publish.assert_called_once()
     call_args = mock_mqtt_client.async_publish.call_args
     assert "power" in call_args[0][0].lower()
+
+
+def test_ping_button_entity_registry_enabled_default_false(mock_mqtt_client):
+    """Test that ping button entities are disabled by default in the entity registry."""
+    device_info = {
+        "device_name": "Test Light",
+        "device_addr": 123,
+        "device_types": ["Light"],
+    }
+    button = HafelePingButton(
+        mock_mqtt_client,
+        123,
+        device_info,
+        "Test Light",
+        "hafele",
+        "lightness",
+        "Ping lightness",
+        "123_ping_lightness",
+    )
+    assert button.entity_registry_enabled_default is False
