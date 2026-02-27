@@ -27,7 +27,8 @@ TOPIC_DISCOVERY_SCENES = f"{{prefix}}/{TOPIC_SCENES}"  # {gateway_topic}/scenes
 # Note: Operation IDs (like setDevicePower, getDevicePower) are for API lookup only, not used in topics
 # SET operations use property name directly (e.g., "power", "lightness")
 # GET operations use property name + "Get" (e.g., "powerGet", "lightnessGet")
-# Format: {gateway_topic}/lights/{device_name}/{topic_name}
+# Format (devices): {gateway_topic}/lights/{device_name}/{topic_name}
+# Format (groups): {gateway_topic}/groups/{group_name}/{topic_name}
 TOPIC_SET_DEVICE_POWER = "{prefix}/lights/{device_name}/power"  # Operation ID: setDevicePower
 TOPIC_GET_DEVICE_POWER = "{prefix}/lights/{device_name}/powerGet"  # Operation ID: getDevicePower
 TOPIC_SET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightness"  # Operation ID: setDeviceLightness
@@ -39,6 +40,8 @@ TOPIC_SET_GROUP_POWER = "{prefix}/groups/{group_name}/power"  # Operation ID: se
 TOPIC_GET_GROUP_POWER = "{prefix}/groups/{group_name}/powerGet"  # Operation ID: getGroupPower
 TOPIC_SET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # Operation ID: setGroupLightness
 TOPIC_GET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightnessGet"  # Operation ID: getGroupLightness
+TOPIC_SET_GROUP_CTL = "{prefix}/groups/{group_name}/ctl"  # Operation ID: setGroupCtl
+TOPIC_GET_GROUP_CTL = "{prefix}/groups/{group_name}/ctlGet"  # Operation ID: getGroupCtl
 TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"  # Operation ID: recallScene
 
 # Status topics (RECEIVE - Subscribe)

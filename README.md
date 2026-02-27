@@ -18,6 +18,7 @@ Please note that this should be considered unstable and is definitely in an alph
 - ✅ Light control (on/off, brightness)
 - ✅ Status polling to keep device states up to date
 - ✅ Configurable polling intervals
+- ✅ Optional **group light entities** that control multiple Hafele devices as a single Home Assistant light (with derived group state)
 
 ## Installation
 
@@ -65,21 +66,24 @@ The integration will guide you through setup via the config flow. You can config
 
 ## MQTT Topics
 
-The integration uses the following MQTT topics:
+The integration follows the official Hafele Connect Mesh MQTT API. In summary:
 
-### Discovery Topics (Subscribed)
-- `hafele/lights` - JSON array of light devices
-- `hafele/groups` - JSON array of groups
-- `hafele/scenes` - JSON array of scenes
+- **Device topics:** `{gateway_topic}/lights/{device_name}/{topic_name}`
+- **Group topics:** `{gateway_topic}/groups/{group_name}/{topic_name}`
+- **Scene topics:** `{gateway_topic}/scenes/{scene_name}/activate`
 
-### Control Topics (Published)
-- `hafele/device/{device_addr}/set` - Control individual lights
-- `hafele/device/{device_addr}/get` - Request device status
+Discovery topics (subscribed by the integration):
 
-### Status Topics (Subscribed)
-- `hafele/device/{device_addr}/status` or `hafele/device/{device_addr}/response` - Device status responses
+- `{gateway_topic}/lights` – JSON array of light devices
+- `{gateway_topic}/groups` – JSON array of groups
+- `{gateway_topic}/scenes` – JSON array of scenes
 
-**Note:** The exact topic patterns may need to be adjusted based on your Hafele MQTT API documentation. You can modify these in `custom_components/hafele_local_mqtt/const.py` if needed.
+Status topics:
+
+- Device status is reported on `{gateway_topic}/lights/{device_name}/status`.
+- Group commands (e.g., `getGroupPower`, `getGroupLightness`, `getGroupCtl`) **also result in status messages on the individual device status topics**, not on a dedicated group status topic. Group state is derived by aggregating the member device states.
+
+For a complete reference of operations and payloads, see `API_OPERATIONS.md`.
 
 ## How It Works
 
@@ -93,6 +97,27 @@ Uses the kind-of-public [Hafele MQTT api for connect mesh](https://help.connect-
    - Updates entity states based on received responses
 
 3. **Control**: When you control a light in Home Assistant, the integration publishes MQTT commands to the appropriate control topic.
+
+4. **Groups**: When group entities are enabled:
+   - The integration listens to `{gateway_topic}/groups` and discovers groups with:
+     - `group_name` (internal MQTT group name, used in topics)
+     - `group_main_addr` (numeric group identifier)
+     - `devices` (list of Hafele device addresses in the group)
+   - It creates a **light entity per group** that:
+     - Uses the **internal** `group_name` for MQTT topics (e.g., `{gateway_topic}/groups/{group_name}/power`).
+     - Uses a **user-friendly display name** in Home Assistant. The group with internal name `TOS_Internal_All` is exposed with display name **“All”** by default.
+     - Derives group state from its member lights:
+       - Group ON: any member device is on.
+       - Group OFF: all member devices are off.
+       - Group brightness: max brightness of its member lights.
+       - Group color temperature: derived from members when at least one light supports color temperature.
+   - Because the gateway reports status only on device topics, the group entity keeps itself in sync by:
+     - Applying an **optimistic** state immediately after group commands.
+     - Watching member entity state changes and recomputing the group state.
+
+5. **Reinitialize groups**: The integration exposes a management button entity named **“Reinitialize groups”**:
+   - Triggering this button causes the integration to re-run its discovery logic (using the existing discovery caches and events), ensuring any newly discovered or previously missing groups get corresponding Home Assistant entities.
+   - You can find this button under the Hafele Local MQTT device’s entities in Home Assistant and invoke it from the UI or automations.
 
 ## Troubleshooting
 

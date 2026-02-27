@@ -88,8 +88,8 @@ def test_on_groups_message(mock_hass, mock_mqtt_client):
     discovery = HafeleDiscovery(mock_hass, mock_mqtt_client, "hafele")
     
     groups_data = [
-        {"group_main_addr": 1, "group_name": "Group 1"},
-        {"group_main_addr": 2, "group_name": "Group 2"},
+        {"group_main_addr": 1, "group_name": "Group 1", "devices": [10, 11]},
+        {"group_main_addr": 2, "group_name": "Group 2", "devices": [12]},
     ]
     
     discovery._on_groups_message("hafele/groups", groups_data)
