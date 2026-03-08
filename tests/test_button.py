@@ -3,7 +3,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.hafele_local_mqtt.debugbutton import HafelePingButton
+from custom_components.hafele_local_mqtt.button import HafeleReinitializeGroupsButton
 from custom_components.hafele_local_mqtt.const import (
+    EVENT_DEVICES_UPDATED,
     TOPIC_GET_DEVICE_LIGHTNESS,
     TOPIC_GET_DEVICE_POWER,
     TOPIC_GET_DEVICE_CTL,
@@ -113,3 +115,11 @@ def test_ping_button_entity_registry_enabled_default_false(mock_mqtt_client):
         "123_ping_lightness",
     )
     assert button.entity_registry_enabled_default is False
+
+
+@pytest.mark.asyncio
+async def test_reinitialize_groups_button_fires_event(mock_hass):
+    """Reinitialize groups button should fire the devices updated event."""
+    button = HafeleReinitializeGroupsButton(mock_hass)
+    await button.async_press()
+    mock_hass.bus.async_fire.assert_called_once_with(EVENT_DEVICES_UPDATED)

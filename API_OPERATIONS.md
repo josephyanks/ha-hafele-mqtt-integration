@@ -8,9 +8,15 @@ This document lists all available operations in the Häfele Connect MQTT API v0.
 
 ## Topic Structure
 
-All topics use the format: `{gateway_topic}/lights/{device_name}/{topic_name}` or `{gateway_topic}/groups/{group_name}/{topic_name}`
+All topics use the format: `{gateway_topic}/lights/{device_name}/{topic_name}` or `{gateway_topic}/groups/{group_name}/{topic_name}`.
 
 Where `{gateway_topic}` is the root topic configured for your gateway (default: `hafele`).
+
+**Important note about groups vs devices:**
+
+- **Groups** are a **routing convenience** in the MQTT API. Group *commands* use the `{gateway_topic}/groups/{group_name}/{topic_name}` pattern.
+- **Status and state are always reported per device** on `{gateway_topic}/lights/{device_name}/status`. There is effectively **no separate group status topic** in the live gateway behavior, even though the API documentation suggests one.
+- Integrations are expected to **derive group state** (on/off, brightness, color temperature, etc.) by aggregating the states of member devices.
 
 ## Discovery Operations (RECEIVE - Subscribe)
 
@@ -119,33 +125,19 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 
 ---
 
-### RECEIVE groupStatus
+### RECEIVE groupStatus (theoretical)
 **Operation ID:** `groupStatus`  
 **Topic:** `{gateway_topic}/groups/{group_name}/status`
 
-**Description:** Receives status updates from groups.
+**Description:** The official API describes a group status topic. In practice, the Häfele gateway reports status **only on individual device topics** (`{gateway_topic}/lights/{device_name}/status`) even when you perform operations against a group.
 
-**Payload Format:**
-```json
-{
-  "group_name": "string",
-  "onOff": "on" | "off",
-  "lightness": 0.0-1.0,
-  "temperature": 800-20000,
-  "hue": 0-360,
-  "saturation": 0.0-1.0
-}
-```
+**Practical usage note:**
 
-**Parameters:**
-- `group_name` (string): Name of the group
-- `onOff` (string): Power state - `"on"` or `"off"`
-- `lightness` (number, 0-1): Lightness level
-- `temperature` (integer, 800-20000): Color temperature
-- `hue` (integer, 0-360): Hue value
-- `saturation` (number, 0-1): Saturation level
+- Treat this section as **documentation of the intended contract only**.  
+- When you send **GET operations to group topics** (e.g. `getGroupPower`, `getGroupLightness`, `getGroupCtl`), the resulting status messages appear on **each member device’s** status topic, not on `{gateway_topic}/groups/{group_name}/status`.
+- Client integrations must compute group state (on/off, lightness, color temperature, etc.) by **aggregating the member device states**.
 
----
+The payload shape for a hypothetical group status is analogous to the device status payload, but you should not rely on `{gateway_topic}/groups/{group_name}/status` being used by the gateway.
 
 ## Device Control Operations (SEND - Publish)
 
@@ -384,7 +376,8 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 {}
 ```
 
-**Note:** Response is received on `{gateway_topic}/groups/{group_name}/status`
+**Note:** In practice, responses are received on the individual device status topics  
+`{gateway_topic}/lights/{device_name}/status` for each device in the group, **not** on a group status topic.
 
 ---
 
@@ -419,7 +412,8 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 {}
 ```
 
-**Note:** Response is received on `{gateway_topic}/groups/{group_name}/status`
+**Note:** In practice, responses are received on the individual device status topics  
+`{gateway_topic}/lights/{device_name}/status` for each device in the group, **not** on a group status topic.
 
 ---
 
@@ -518,7 +512,8 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 {}
 ```
 
-**Note:** Response is received on `{gateway_topic}/groups/{group_name}/status`
+**Note:** In practice, responses are received on the individual device status topics  
+`{gateway_topic}/lights/{device_name}/status` for each device in the group, **not** on a group status topic.
 
 ---
 
@@ -555,7 +550,8 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
 {}
 ```
 
-**Note:** Response is received on `{gateway_topic}/groups/{group_name}/status`
+**Note:** In practice, responses are received on the individual device status topics  
+`{gateway_topic}/lights/{device_name}/status` for each device in the group, **not** on a group status topic.
 
 ---
 
@@ -754,9 +750,9 @@ Where `{gateway_topic}` is the root topic configured for your gateway (default: 
    - 10s steps: 1-10.5 minutes
    - 10-minute steps: up to 10.5 hours
 
-3. **Status Responses:** GET operations don't have a separate response topic. Status is received on the corresponding status topic:
+3. **Status Responses:** GET operations don't have a separate response topic. Status is received on the corresponding status topics:
    - Device status: `{gateway_topic}/lights/{device_name}/status`
-   - Group status: `{gateway_topic}/groups/{group_name}/status`
+   - Group operations also result in status on **device** status topics (there is effectively no separate group status topic in practice).
 
 4. **Value Ranges:**
    - Lightness: 0.0 to 1.0 (0-100%)
