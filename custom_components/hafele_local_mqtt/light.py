@@ -548,6 +548,7 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
         
         # Store last known lightness value (0-1 scale, as used by API)
         self._last_known_lightness: float | None = None
+        self._last_known_color_temp: int = 2700
 
         self._priority = PollPriority.NORMAL  # update priority for rational polling
 
@@ -668,12 +669,6 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
 
         status = self.coordinator.data
         if isinstance(status, dict):
-            # Multiwhite color temp
-            #if getattr(self, "_is_multiwhite", False):
-            #    temp_kelvin = status.get("temperature")
-            #    if temp_kelvin is not None:
-            #        self._attr_color_temp_kelvin = min(max(temp_kelvin, 2700), 5000)
-            #        self._attr_color_mode = ColorMode.COLOR_TEMP
             # API uses "lightness" field with 0-1 scale
             lightness = status.get("lightness")
             if lightness is not None:
@@ -727,13 +722,11 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
             # Color temperature
             if ATTR_COLOR_TEMP_KELVIN in kwargs:
                 temp_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
-                self._attr_color_temp = min(max(temp_kelvin, 2700), 5000)
-            else:
-                self._attr_color_temp = self._attr_color_temp or 2700
+                self._last_known_color_temp = min(max(temp_kelvin, 2700), 5000)
 
             payload_ctl = {
                 "lightness" : lightness,
-                "temperature": self._attr_color_temp,
+                "temperature": self._last_known_color_temp,
             }
             topic_ctl = TOPIC_SET_DEVICE_CTL.format(
                 prefix=self.topic_prefix, device_name=self._device_name
@@ -746,14 +739,14 @@ class HafeleLightEntity(CoordinatorEntity, LightEntity):
                     {
                         "onoff": 1,
                         "lightness": lightness,
-                        "temperature": self._attr_color_temp,
+                        "temperature": self._last_known_color_temp,
                     }
                 )
             else:
                 self.coordinator.data = {
                     "onoff": 1,
                     "lightness": lightness,
-                    "temperature": self._attr_color_temp,
+                    "temperature": self._last_known_color_temp,
                 }
 
             self._attr_color_mode = ColorMode.COLOR_TEMP
