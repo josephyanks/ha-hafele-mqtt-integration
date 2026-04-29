@@ -21,12 +21,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
 from .const import (
+    CONF_ENABLE_GROUPS,
     DOMAIN,
     EVENT_DEVICES_UPDATED,
     TOPIC_GET_DEVICE_LIGHTNESS,
@@ -43,6 +41,7 @@ from .const import (
     POLLING_MODE_ROTATIONAL,
 )
 from .discovery import HafeleDiscovery
+from .hafele_group import HafeleGroupLightEntity
 from .mqtt_client import HafeleMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -242,7 +241,8 @@ async def async_setup_entry(
 
     # Track which entities we've already created in this session
     created_entities: set[int] = set()
-    
+    created_group_entities: set[int] = set()
+
     # Track coordinators for startup status requests
     coordinators: dict[int, HafeleLightCoordinator] = {}
     
@@ -361,18 +361,93 @@ async def async_setup_entry(
             async_add_entities(new_entities, update_before_add=False)
             _LOGGER.info("Finished adding %d light entities", len(new_entities))
 
+    async def _create_entities_for_groups() -> None:
+        """Create group light entities for all discovered groups."""
+        if not entry.data.get(CONF_ENABLE_GROUPS, True):
+            return
+
+        groups = discovery.get_all_groups()
+        new_entities: list[HafeleGroupLightEntity] = []
+
+        for group_addr, group in groups.items():
+            # Skip if we've already created this group entity in this session
+            if group_addr in created_group_entities:
+                continue
+
+            devices_addrs = group.get("devices") or []
+            if not devices_addrs:
+                _LOGGER.debug(
+                    "Skipping group %s (addr: %s) - no devices listed",
+                    group.get("group_name"),
+                    group_addr,
+                )
+                continue
+
+            member_entity_ids: list[str] = []
+            for device_addr in devices_addrs:
+                if not isinstance(device_addr, int):
+                    continue
+                unique_id = f"{device_addr}_mqtt"
+                member_entity_id = entity_registry.async_get_entity_id(
+                    "light", DOMAIN, unique_id
+                )
+                if member_entity_id:
+                    member_entity_ids.append(member_entity_id)
+
+            if not member_entity_ids:
+                _LOGGER.debug(
+                    "Skipping group %s (addr: %s) - no member lights resolved",
+                    group.get("group_name"),
+                    group_addr,
+                )
+                continue
+
+            entity = HafeleGroupLightEntity(
+                hass,
+                mqtt_client,
+                topic_prefix,
+                group_addr,
+                group,
+                member_entity_ids,
+            )
+            new_entities.append(entity)
+            created_group_entities.add(group_addr)
+
+        if new_entities:
+            _LOGGER.info("Adding %d group light entities", len(new_entities))
+            # Suggest entity_ids based on group display name
+            import re
+
+            for entity in new_entities:
+                display_name = entity.name or f"group_{entity.extra_state_attributes.get('group_main_addr', 'unknown')}"
+                entity_id_base = str(display_name).lower().replace(" ", "_").replace("-", "_")
+                entity_id_base = re.sub(r"[^a-z0-9_]", "", entity_id_base)
+                suggested_object_id = f"{entity_id_base}_group"
+
+                entity_registry.async_get_or_create(
+                    "light",
+                    DOMAIN,
+                    entity.unique_id,
+                    suggested_object_id=suggested_object_id,
+                )
+
+            async_add_entities(new_entities, update_before_add=False)
+            _LOGGER.info("Finished adding %d group light entities", len(new_entities))
+
     @callback
     def _on_devices_updated(event) -> None:
         """Handle device discovery update event."""
         hass.async_create_task(_create_entities_for_devices())
+        hass.async_create_task(_create_entities_for_groups())
 
     # Listen for device discovery updates
     entry.async_on_unload(
         hass.bus.async_listen(EVENT_DEVICES_UPDATED, _on_devices_updated)
     )
 
-    # Create entities for any devices already discovered
+    # Create entities for any devices and groups already discovered
     await _create_entities_for_devices()
+    await _create_entities_for_groups()
 
     # Start rotational polling only if polling_mode is rotational
     # Normal mode uses per-device automatic polling via update_interval
