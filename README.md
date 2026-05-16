@@ -3,8 +3,10 @@
 [![GitHub release](https://img.shields.io/github/release/josephyanks/ha-hafele-mqtt-integration.svg)](https://github.com/josephyanks/ha-hafele-mqtt-integration/releases)
 [![License](https://img.shields.io/github/license/josephyanks/ha-hafele-mqtt-integration.svg)](LICENSE)
 
-<img src="./custom_components/hafele_local_mqtt/logo/icon.png" height="128" width="128" />
+> [!WARNING]  
+> This project is a community-driven, unofficial integration. It is not affiliated with, authorized, maintained, sponsored, or endorsed by Häfele GmbH & Co KG or any of its affiliates. All product and company names are trademarks™ or registered® trademarks of their respective holders..
 
+<img src="./custom_components/hafele_local_mqtt/logo/icon.png" height="128" width="128" />
 Home Assistant custom integration for controlling Hafele LED lights via MQTT using local control.
 You need a "Gateway, Häfele Connect Mesh"-device which will be the bridge between the Bluetooth LE network and the MQTT.
 
