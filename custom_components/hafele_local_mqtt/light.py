@@ -32,6 +32,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import (
+    CONF_ENABLE_GROUPS,
     DOMAIN,
     EVENT_DEVICES_UPDATED,
     TOPIC_GET_DEVICE_LIGHTNESS,
@@ -51,6 +52,27 @@ from .discovery import HafeleDiscovery
 from .mqtt_client import HafeleMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _suggested_object_id_from_name(name: str) -> str:
+    """Build a Home Assistant object id fragment from a mesh device or group name."""
+    entity_id_base = name.lower().replace(" ", "_").replace("-", "_")
+    return re.sub(r"[^a-z0-9_]", "", entity_id_base).strip("_")
+
+
+def _light_entity_id_for_device(
+    entity_registry: er.EntityRegistry,
+    device_addr: int,
+    dev_info: dict[str, Any],
+) -> str | None:
+    """Resolve a light entity_id from the registry, falling back to sanitized device name."""
+    unique_id = f"hafele_{device_addr}"
+    entity_id = entity_registry.async_get_entity_id("light", DOMAIN, unique_id)
+    if entity_id:
+        return entity_id
+    name = dev_info.get("device_name", f"device_{device_addr}").strip()
+    clean_id = _suggested_object_id_from_name(name)
+    return f"light.{clean_id}" if clean_id else None
 
 
 class HafeleLightCoordinator(DataUpdateCoordinator):
@@ -245,6 +267,7 @@ async def async_setup_entry(
     polling_interval = data["polling_interval"]
     polling_timeout = data["polling_timeout"]
     polling_mode = data.get("polling_mode", DEFAULT_POLLING_MODE)
+    enable_groups = entry.data.get(CONF_ENABLE_GROUPS, True)
     _LOGGER.debug(f"async_setup_entry: topic_prefix {topic_prefix}, polling mode: {polling_mode},"
                   f" polling interval {polling_interval}")
 
@@ -271,7 +294,7 @@ async def async_setup_entry(
             # Check if entity already exists in Home Assistant's entity registry
             # We still need to create and provide the entity even if it exists,
             # otherwise Home Assistant will think it's no longer being provided
-            unique_id = f"{device_addr}_mqtt"
+            unique_id = f"hafele_{device_addr}"
             existing_entity_id = entity_registry.async_get_entity_id(
                 "light", DOMAIN, unique_id
             )
@@ -335,55 +358,52 @@ async def async_setup_entry(
             new_entities.append(entity)
             created_entities.add(device_addr)
 
-            # Generate entity_id from device name: lowercase, replace spaces with underscores
-            entity_id_base = device_name.lower().replace(" ", "_").replace("-", "_")
-            # Remove any special characters that aren't allowed in entity IDs
-            suggested_object_id = re.sub(r"[^a-z0-9_]", "", entity_id_base)
-            
-            # Register/update entity in registry with suggested entity_id
-            # This will update existing entities or create new ones
+            suggested_object_id = _suggested_object_id_from_name(device_name)
             entity_registry.async_get_or_create(
                 "light", DOMAIN, entity.unique_id, suggested_object_id=suggested_object_id
             )
 
-        # Process discovered native groups
-        discovered_groups = discovery.get_all_groups()  
-        for group_addr, group_info in discovered_groups.items():  
-            if group_addr in created_groups:  
-                continue  
+        if enable_groups:
+            discovered_groups = discovery.get_all_groups()
+            for group_addr, group_info in discovered_groups.items():
+                if group_addr in created_groups:
+                    continue
 
-            group_name = group_info.get("group_name")  
-            if not group_name:  
-                continue  
+                group_name = group_info.get("group_name")
+                if not group_name:
+                    continue
 
-            member_device_addresses = group_info.get("devices", [])  
+                member_device_addresses = group_info.get("devices", [])
+                child_entity_ids: list[str] = []
+                for addr in member_device_addresses:
+                    dev_info = discovery.get_device(addr)
+                    if dev_info:
+                        entity_id = _light_entity_id_for_device(
+                            entity_registry, addr, dev_info
+                        )
+                        if entity_id:
+                            child_entity_ids.append(entity_id)
 
-            child_entity_ids = []  
-            for addr in member_device_addresses:  
-                dev_info = discovery.get_device(addr)  
-                if dev_info:  
-                    name = dev_info.get("device_name", f"device_{addr}").strip()
-                    entity_id_base = name.lower().replace(" ", "_").replace("-", "_")
-                    clean_id = re.sub(r"[^a-z0-9_]", "", entity_id_base)
-                    clean_id = clean_id.strip("_")
-                    child_entity_ids.append(f"light.{clean_id}")  
+                _LOGGER.info(
+                    "Creating native group: %s (addr: %s) mapping to entities: %s",
+                    group_name,
+                    group_addr,
+                    child_entity_ids,
+                )
 
-            _LOGGER.info(
-                "Creating native group: %s (addr: %s) mapping precisely to tracking entities: %s", 
-                group_name, group_addr, child_entity_ids
-            )
+                group_entity = HafeleMeshLightGroup(
+                    group_addr, group_name, child_entity_ids, mqtt_client, topic_prefix
+                )
+                new_entities.append(group_entity)
+                created_groups.add(group_addr)
 
-            group_entity = HafeleMeshLightGroup(  
-                group_addr, group_name, child_entity_ids, mqtt_client, topic_prefix  
-            )
-            new_entities.append(group_entity)  
-            created_groups.add(group_addr)  
-
-            group_id_base = group_name.lower().replace(" ", "_").replace("-", "_")  
-            suggested_group_obj_id = re.sub(r"[^a-z0-9_]", "", group_id_base)  
-            entity_registry.async_get_or_create(
-                "light", DOMAIN, group_entity.unique_id, suggested_object_id=suggested_group_obj_id  
-            )  
+                suggested_group_obj_id = _suggested_object_id_from_name(group_name)
+                entity_registry.async_get_or_create(
+                    "light",
+                    DOMAIN,
+                    group_entity.unique_id,
+                    suggested_object_id=suggested_group_obj_id,
+                )
 
         if new_entities:
             _LOGGER.info("Adding %d light entities", len(new_entities))
@@ -485,7 +505,7 @@ async def async_setup_entry(
 
 
 class PollPriority:
-    """Polling Update Priority, the lower the priority, the faster it gets updadatet"""
+    """Polling update priority; lower values are refreshed sooner."""
     NORMAL = 5  # default priority
     HIGH = 1    # high priority = updated first
 
@@ -948,7 +968,7 @@ class HafeleMeshLightGroup(LightGroup):
             self._last_known_color_temp = target_color_temp
 
         # Fire optimized single-payload commands to the Mesh network gateway
-        if ATTR_COLOR_TEMP_KELVIN in kwargs or ColorMode.COLOR_TEMP in self.supported_color_modes:
+        if ATTR_COLOR_TEMP_KELVIN in kwargs:
             payload = {"lightness": target_lightness, "temperature": target_color_temp}
             await self.mqtt_client.async_publish(self._ctl_topic, payload, qos=1)
         elif ATTR_BRIGHTNESS in kwargs:

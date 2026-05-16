@@ -23,7 +23,13 @@ from custom_components.hafele_local_mqtt.const import (
     CONF_MQTT_PASSWORD,
     CONF_MQTT_PORT,
     CONF_MQTT_USERNAME,
+    CONF_POLLING_INTERVAL,
+    CONF_POLLING_MODE,
     CONF_TOPIC_PREFIX,
+    CONF_USE_HA_MQTT,
+    DEFAULT_POLLING_INTERVAL,
+    DEFAULT_POLLING_MODE,
+    POLLING_MODE_NORMAL,
 )
 
 
@@ -184,6 +190,7 @@ async def test_config_flow_manual_success(mock_validate, flow):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == "Häfele Mesh (localhost)"
+    assert result["data"][CONF_USE_HA_MQTT] is False
     flow.async_set_unique_id.assert_awaited_with("localhost_Mesh")
 
 
@@ -233,6 +240,7 @@ async def test_config_flow_automatic_shows_credentials(mock_create_user, flow):
     assert result["step_id"] == "show_credentials"
     assert flow._generated_username == "haefele_mesh_abc123"
     assert flow._mqtt_config[CONF_MQTT_BROKER] == "localhost"
+    assert flow._mqtt_config[CONF_USE_HA_MQTT] is False
 
 
 @pytest.mark.asyncio
@@ -248,6 +256,7 @@ async def test_config_flow_show_credentials_creates_entry(mock_validate, flow):
         CONF_MQTT_USERNAME: "haefele_mesh_abc123",
         CONF_MQTT_PASSWORD: "generated",
         CONF_TOPIC_PREFIX: "Mesh",
+        CONF_USE_HA_MQTT: False,
     }
     flow._generated_username = "haefele_mesh_abc123"
     flow._generated_password = "generated"
@@ -256,6 +265,7 @@ async def test_config_flow_show_credentials_creates_entry(mock_validate, flow):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == "Häfele Mesh (Auto)"
+    assert result["data"][CONF_USE_HA_MQTT] is False
     flow.async_set_unique_id.assert_awaited_with("auto_Mesh")
 
 
@@ -379,6 +389,11 @@ async def test_config_flow_automatic_end_to_end(
         CONF_MQTT_USERNAME: "haefele_mesh_e2e01",
         CONF_MQTT_PASSWORD: "fixed-test-password",
         CONF_TOPIC_PREFIX: "Kitchen",
+        CONF_USE_HA_MQTT: False,
+        CONF_POLLING_INTERVAL: DEFAULT_POLLING_INTERVAL,
+        CONF_POLLING_MODE: POLLING_MODE_NORMAL,
+        CONF_ENABLE_GROUPS: True,
+        CONF_ENABLE_SCENES: True,
     }
 
     step_credentials = await flow.async_step_show_credentials({})
@@ -386,6 +401,7 @@ async def test_config_flow_automatic_end_to_end(
     assert step_credentials["title"] == "Häfele Mesh (Auto)"
     assert step_credentials["data"][CONF_MQTT_PASSWORD] == "fixed-test-password"
     assert step_credentials["data"][CONF_TOPIC_PREFIX] == "Kitchen"
+    assert step_credentials["data"][CONF_USE_HA_MQTT] is False
     flow.async_set_unique_id.assert_awaited_with("auto_Kitchen")
     mock_create_user.assert_awaited_once_with(flow.hass, "haefele_mesh", "fixed-test-password")
     mock_validate.assert_awaited_once_with(flow.hass, flow._mqtt_config)

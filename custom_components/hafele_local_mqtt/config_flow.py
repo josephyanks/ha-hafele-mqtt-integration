@@ -13,8 +13,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries, exceptions
 from homeassistant.auth.const import GROUP_ID_USER
-from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
 
@@ -154,7 +153,7 @@ async def create_mosquitto_user(
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a configuration setup flow for the Häfele Mesh local MQTT integration."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow layout data variables."""
@@ -209,7 +208,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_MQTT_PORT: 1883,
                 CONF_MQTT_USERNAME: actual_username,
                 CONF_MQTT_PASSWORD: password,
-                CONF_TOPIC_PREFIX: user_input.get(CONF_TOPIC_PREFIX, "Mesh"),
+                CONF_TOPIC_PREFIX: user_input.get(CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX),
+                CONF_USE_HA_MQTT: False,
+                CONF_POLLING_INTERVAL: DEFAULT_POLLING_INTERVAL,
+                CONF_POLLING_MODE: DEFAULT_POLLING_MODE,
+                CONF_ENABLE_GROUPS: True,
+                CONF_ENABLE_SCENES: True,
             }
             self._generated_username = actual_username
             self._generated_password = password
@@ -220,7 +224,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="automatic",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_TOPIC_PREFIX, default="Mesh"): str,
+                    vol.Required(CONF_TOPIC_PREFIX, default=DEFAULT_TOPIC_PREFIX): str,
                 }
             ),
         )
@@ -291,7 +295,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 self._abort_if_unique_id_configured()
 
-                return self.async_create_entry(title=info["title"], data=user_input)
+                entry_data = {**user_input, CONF_USE_HA_MQTT: False}
+                return self.async_create_entry(title=info["title"], data=entry_data)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except Exception:
@@ -305,10 +310,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_MQTT_PORT, default=1883): cv.port,
                     vol.Optional(CONF_MQTT_USERNAME): str,
                     vol.Optional(CONF_MQTT_PASSWORD): str,
-                    vol.Required(CONF_TOPIC_PREFIX, default="Mesh"): str,
+                    vol.Required(CONF_TOPIC_PREFIX, default=DEFAULT_TOPIC_PREFIX): str,
                     vol.Optional(
                         CONF_POLLING_INTERVAL, default=DEFAULT_POLLING_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=2)),
+                    vol.Optional(
+                        CONF_POLLING_TIMEOUT, default=DEFAULT_POLLING_TIMEOUT
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
                     vol.Optional(CONF_POLLING_MODE, default=POLLING_MODE_NORMAL): vol.In(
                         [POLLING_MODE_NORMAL, POLLING_MODE_ROTATIONAL]
                     ),
