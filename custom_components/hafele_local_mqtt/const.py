@@ -33,16 +33,15 @@ TOPIC_GET_DEVICE_POWER = "{prefix}/lights/{device_name}/powerGet"  # Operation I
 TOPIC_SET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightness"  # Operation ID: setDeviceLightness
 TOPIC_GET_DEVICE_LIGHTNESS = "{prefix}/lights/{device_name}/lightnessGet"  # Operation ID: getDeviceLightness
 TOPIC_SET_DEVICE_TEMPERATURE = "{prefix}/lights/{device_name}/temperature"  # Operation ID: setDeviceTemperature <-- Not working!! use ctl 01.2026
-TOPIC_SET_DEVICE_CTL = "{prefix}/lights/{device_name}/ctl"
-TOPIC_GET_DEVICE_CTL = "{prefix}/lights/{device_name}/ctlGet"
+TOPIC_SET_DEVICE_CTL = "{prefix}/lights/{device_name}/ctl" # Control Get
+TOPIC_GET_DEVICE_CTL = "{prefix}/lights/{device_name}/ctlGet"# Control Command
 TOPIC_SET_GROUP_POWER = "{prefix}/groups/{group_name}/power"  # Operation ID: setGroupPower
 TOPIC_GET_GROUP_POWER = "{prefix}/groups/{group_name}/powerGet"  # Operation ID: getGroupPower
 TOPIC_SET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # Operation ID: setGroupLightness
 TOPIC_GET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightnessGet"  # Operation ID: getGroupLightness
 TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"  # Operation ID: recallScene
-TOPIC_SET_GROUP_CTL = "{prefix}/groups/{group_name}/ctl"
-TOPIC_SET_DEVICE_CTL = "{prefix}/lights/{device_name}/ctl"
-TOPIC_GET_DEVICE_CTL = "{prefix}/lights/{device_name}/ctlGet"
+TOPIC_SET_GROUP_CTL = "{prefix}/groups/{group_name}/ctl" # Group Control
+
 # Status topics (RECEIVE - Subscribe)
 # API: RECEIVE lightStatus, groupStatus
 # Format: {gateway_topic}/lights/{device_name}/status
