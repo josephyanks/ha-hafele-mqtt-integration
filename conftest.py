@@ -18,8 +18,20 @@ if "homeassistant" not in sys.modules:
         @classmethod
         def __init_subclass__(cls, domain=None, **kwargs):
             pass
-        def async_show_form(self, step_id, data_schema=None, errors=None):
-            return {"type": "form", "step_id": step_id, "errors": errors or {}}
+        def async_show_form(
+            self,
+            step_id,
+            data_schema=None,
+            errors=None,
+            description_placeholders=None,
+            **kwargs,
+        ):
+            return {
+                "type": "form",
+                "step_id": step_id,
+                "errors": errors or {},
+                "description_placeholders": description_placeholders or {},
+            }
         def async_create_entry(self, title, data):
             return {"type": "create_entry", "title": title, "data": data}
         async def async_set_unique_id(self, unique_id):
@@ -33,7 +45,11 @@ if "homeassistant" not in sys.modules:
     mock_ha.const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
     mock_ha.components = Mock()
     mock_ha.components.light = Mock()
-    mock_ha.components.light.ColorMode = Mock()
+    class _ColorMode:
+        BRIGHTNESS = "brightness"
+        COLOR_TEMP = "color_temp"
+
+    mock_ha.components.light.ColorMode = _ColorMode
     _LightEntityBase = type("LightEntity", (), {"async_write_ha_state": Mock()})
     mock_ha.components.light.LightEntity = _LightEntityBase
     mock_ha.components.light.ATTR_BRIGHTNESS = "brightness"
@@ -46,7 +62,42 @@ if "homeassistant" not in sys.modules:
     mock_ha.components.mqtt.async_subscribe = Mock()
     mock_ha.components.mqtt.async_publish = Mock()
     mock_ha.components.mqtt.ReceiveMessage = Mock()
+    mock_ha.components.group = Mock()
+    mock_ha.components.group.light = Mock()
+
+    class _LightGroup:
+        def __init__(self, unique_id=None, name=None, entity_ids=None, mode=False, **kwargs):
+            self.unique_id = unique_id
+            self.name = name
+            self.entity_ids = entity_ids or []
+            self._attr_is_on = False
+            self._attr_brightness = None
+            self.hass = None
+            self.entity_id = f"light.{(name or 'group').lower().replace(' ', '_')}"
+
+        @property
+        def supported_color_modes(self):
+            return set()
+
+        def async_write_ha_state(self):
+            pass
+
+        def async_update_ha_state(self, force_refresh=False):
+            pass
+
+    mock_ha.components.group.light.LightGroup = _LightGroup
+    mock_ha.exceptions = Mock()
+
+    class _HomeAssistantError(Exception):
+        pass
+
+    mock_ha.exceptions.HomeAssistantError = _HomeAssistantError
+    mock_ha.auth = Mock()
+    mock_ha.auth.const = Mock()
+    mock_ha.auth.const.GROUP_ID_USER = "system-users"
     mock_ha.helpers = Mock()
+    mock_ha.helpers.config_validation = Mock()
+    mock_ha.helpers.config_validation.port = lambda value: value
     mock_ha.helpers.entity_registry = Mock()
     mock_ha.helpers.entity_registry.EntityRegistry = type("EntityRegistry", (), {})
     mock_ha.helpers.entity_registry.async_get = Mock()
@@ -55,6 +106,7 @@ if "homeassistant" not in sys.modules:
     class _CoordinatorEntity:
         def __init__(self, coordinator=None, *args, **kwargs):
             self.coordinator = coordinator
+            self.hass = getattr(coordinator, "hass", None) if coordinator else None
 
     class _DataUpdateCoordinator:
         def __init__(self, hass=None, logger=None, name=None, update_interval=None, *args, **kwargs):
@@ -94,6 +146,12 @@ if "homeassistant" not in sys.modules:
         ("homeassistant.components.light", mock_ha.components.light),
         ("homeassistant.components.button", mock_ha.components.button),
         ("homeassistant.components.mqtt", mock_ha.components.mqtt),
+        ("homeassistant.components.group", mock_ha.components.group),
+        ("homeassistant.components.group.light", mock_ha.components.group.light),
+        ("homeassistant.exceptions", mock_ha.exceptions),
+        ("homeassistant.auth", mock_ha.auth),
+        ("homeassistant.auth.const", mock_ha.auth.const),
+        ("homeassistant.helpers.config_validation", mock_ha.helpers.config_validation),
         ("homeassistant.helpers.update_coordinator", mock_ha.helpers.update_coordinator),
         ("homeassistant.helpers.entity", mock_ha.helpers.entity),
         ("homeassistant.helpers.entity_platform", mock_ha.helpers.entity_platform),

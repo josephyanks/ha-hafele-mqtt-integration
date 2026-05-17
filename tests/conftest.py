@@ -1,11 +1,31 @@
 """Test fixtures for Hafele Local MQTT integration."""
 # Root conftest.py installs HA mocks before this runs.
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock
+from __future__ import annotations
+
+import asyncio
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, Mock
+
+import pytest
 
 from custom_components.hafele_local_mqtt.const import DOMAIN
+
+
+def schedule_ha_task(coro: Any) -> Any:
+    """Mock Home Assistant ``async_create_task``: schedule or finish coroutines cleanly."""
+    if not asyncio.iscoroutine(coro):
+        return MagicMock(name="ha_task")
+    try:
+        return asyncio.get_running_loop().create_task(coro)
+    except RuntimeError:
+        asyncio.run(coro)
+        return MagicMock(name="ha_task")
+
+
+def fire_ha_event(*_args: Any, **_kwargs: Any) -> None:
+    """Mock ``bus.async_fire`` when integration code does not await the call."""
+    return None
 
 # Use Mock types for type hints
 HomeAssistant = Mock
@@ -21,10 +41,10 @@ def mock_hass():
     hass = MagicMock(spec=HomeAssistant)
     hass.data = {DOMAIN: {}}
     hass.bus = MagicMock()
-    hass.bus.async_fire = AsyncMock()
+    hass.bus.async_fire = MagicMock(side_effect=fire_ha_event)
     hass.bus.async_listen = MagicMock(return_value=MagicMock())
     hass.bus.async_listen_once = MagicMock(return_value=MagicMock())
-    hass.async_create_task = AsyncMock()
+    hass.async_create_task = MagicMock(side_effect=schedule_ha_task)
     hass.async_block_till_done = AsyncMock()
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()

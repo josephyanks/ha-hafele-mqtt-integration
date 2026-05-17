@@ -1,6 +1,10 @@
 """Tests for the Hafele light platform."""
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from tests.conftest import schedule_ha_task
 
 from homeassistant.components.light import ColorMode
 
@@ -26,8 +30,15 @@ def mock_coordinator():
     coordinator.async_request_refresh = AsyncMock()
     coordinator.polling_mode = POLLING_MODE_NORMAL
     coordinator.hass = MagicMock()
-    coordinator.hass.async_create_task = AsyncMock()
+    coordinator.hass.async_create_task = MagicMock(side_effect=schedule_ha_task)
+    coordinator.hass.data = {"light": MagicMock()}
+    coordinator.hass.data["light"].entities = []
     return coordinator
+
+
+async def _drain_scheduled_tasks() -> None:
+    """Yield to the event loop so ``async_create_task`` work can finish."""
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -45,9 +56,9 @@ async def test_light_is_on(mock_coordinator, sample_device_info, mock_mqtt_clien
     mock_coordinator.data = {"onoff": 0}
     assert entity.is_on is False
     
-    # Test with no data
+    # Test with no data (unknown until first poll)
     mock_coordinator.data = None
-    assert entity.is_on is None
+    assert entity.is_on is False
     
     # Test with onOff (camelCase) format
     mock_coordinator.data = {"onOff": "on"}
@@ -78,7 +89,7 @@ async def test_light_brightness(mock_coordinator, sample_device_info, mock_mqtt_
     
     # Test with no data
     mock_coordinator.data = None
-    assert entity.brightness is None
+    assert entity.brightness == 0
 
 
 @pytest.mark.asyncio
@@ -99,9 +110,13 @@ async def test_light_color_temp(mock_coordinator, sample_multiwhite_device_info,
     mock_coordinator.data = {"temperature": 6000}
     assert entity.color_temp_kelvin == 5000
     
-    # Test with no data
+    # Test with no data (unknown until first poll)
     mock_coordinator.data = None
     assert entity.color_temp_kelvin is None
+
+    # Test with coordinator data but no temperature field uses default kelvin
+    mock_coordinator.data = {"onoff": 1}
+    assert entity.color_temp_kelvin == 2700
 
 
 @pytest.mark.asyncio
@@ -113,8 +128,10 @@ async def test_light_turn_on_monochrome(mock_coordinator, sample_device_info, mo
     mock_coordinator.data = {}
     
     # Test turning on with brightness
-    await entity.async_turn_on(brightness=128)
-    
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await entity.async_turn_on(brightness=128)
+        await _drain_scheduled_tasks()
+
     # Verify MQTT publish was called for power and lightness
     assert mock_mqtt_client.async_publish.call_count >= 2
     mock_coordinator.hass.async_create_task.assert_called_once()
@@ -133,8 +150,10 @@ async def test_light_turn_on_multiwhite(mock_coordinator, sample_multiwhite_devi
     mock_coordinator.data = {}
     
     # Test turning on with brightness and color temp
-    await entity.async_turn_on(brightness=128, color_temp_kelvin=3500)
-    
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await entity.async_turn_on(brightness=128, color_temp_kelvin=3500)
+        await _drain_scheduled_tasks()
+
     # Verify MQTT publish was called for CTL
     mock_mqtt_client.async_publish.assert_called_once()
     call_args = mock_mqtt_client.async_publish.call_args
@@ -154,15 +173,56 @@ async def test_light_turn_off(mock_coordinator, sample_device_info, mock_mqtt_cl
     )
     mock_coordinator.data = {"onoff": 1}
     
-    await entity.async_turn_off()
-    
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await entity.async_turn_off()
+        await _drain_scheduled_tasks()
+
     # Verify MQTT publish was called
     mock_mqtt_client.async_publish.assert_called_once()
     call_args = mock_mqtt_client.async_publish.call_args
     assert "power" in call_args[0][0]  # Topic contains "power"
-    
+
     # Verify optimistic update
     assert mock_coordinator.data.get("onoff") == 0
+    assert mock_coordinator.data.get("lightness") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_light_unique_id_uses_device_addr(mock_coordinator, sample_device_info, mock_mqtt_client):
+    """Device entities use hafele_{addr} unique_id instead of legacy _mqtt suffix."""
+    entity = HafeleLightEntity(
+        mock_coordinator, 123, sample_device_info, mock_mqtt_client, "Mesh"
+    )
+    assert entity._attr_unique_id == "hafele_123"
+
+
+@pytest.mark.asyncio
+async def test_light_update_parent_groups(mock_coordinator, sample_device_info, mock_mqtt_client):
+    """Child lights notify parent mesh groups to refresh aggregated state."""
+    from custom_components.hafele_local_mqtt.light import HafeleMeshLightGroup
+
+    entity = HafeleLightEntity(
+        mock_coordinator, 123, sample_device_info, mock_mqtt_client, "Mesh"
+    )
+    entity.entity_id = "light.test_light"
+    entity.hass = MagicMock()
+    entity.hass.data = {"light": MagicMock()}
+
+    parent = HafeleMeshLightGroup(
+        10, "Kitchen", ["light.test_light", "light.other"], mock_mqtt_client, "Mesh"
+    )
+    parent.async_update_group_state_from_children = MagicMock()
+    unrelated = HafeleMeshLightGroup(
+        11, "Hall", ["light.other"], mock_mqtt_client, "Mesh"
+    )
+    unrelated.async_update_group_state_from_children = MagicMock()
+
+    entity.hass.data["light"].entities = [parent, unrelated]
+
+    await entity.async_update_parent_groups()
+
+    parent.async_update_group_state_from_children.assert_called_once()
+    unrelated.async_update_group_state_from_children.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -227,6 +287,7 @@ async def test_coordinator_status_message(mock_hass, mock_mqtt_client):
         30,
         3,
         POLLING_MODE_NORMAL,
+        [],
     )
     
     # Simulate status message
@@ -250,6 +311,7 @@ async def test_coordinator_update_data(mock_hass, mock_mqtt_client):
         30,
         3,
         POLLING_MODE_NORMAL,
+        [],
     )
     
     # Mock entity
@@ -281,6 +343,7 @@ async def test_coordinator_update_data_timeout(mock_hass, mock_mqtt_client):
         30,
         1,  # Short timeout
         POLLING_MODE_NORMAL,
+        [],
     )
     
     entity = MagicMock()

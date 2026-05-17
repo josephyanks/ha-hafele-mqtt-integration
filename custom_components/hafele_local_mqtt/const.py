@@ -40,6 +40,7 @@ TOPIC_GET_GROUP_POWER = "{prefix}/groups/{group_name}/powerGet"  # Operation ID:
 TOPIC_SET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightness"  # Operation ID: setGroupLightness
 TOPIC_GET_GROUP_LIGHTNESS = "{prefix}/groups/{group_name}/lightnessGet"  # Operation ID: getGroupLightness
 TOPIC_SCENE_ACTIVATE = "{prefix}/scenes/{scene_name}/activate"  # Operation ID: recallScene
+TOPIC_SET_GROUP_CTL = "{prefix}/groups/{group_name}/ctl" # Group Control
 
 # Status topics (RECEIVE - Subscribe)
 # API: RECEIVE lightStatus, groupStatus

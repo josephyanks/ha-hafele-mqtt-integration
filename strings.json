@@ -5,17 +5,7 @@
         "title": "Connect to Häfele Mesh Gateway",
         "description": "Choose how you want to configure MQTT",
         "data": {
-          "setup_type": "Setup Type",
-          "use_ha_mqtt": "Use Home Assistant MQTT Broker",
-          "mqtt_broker": "MQTT Broker Host",
-          "mqtt_port": "MQTT Broker Port",
-          "mqtt_username": "MQTT Username",
-          "mqtt_password": "MQTT Password",
-          "topic_prefix": "MQTT Topic Prefix",
-          "polling_interval": "Polling Interval (seconds)",
-          "polling_timeout": "Polling Timeout (seconds)",
-          "enable_groups": "Enable Group Entities",
-          "enable_scenes": "Enable Scene Entities"
+          "setup_type": "Setup Type"
         }
       },
       "automatic": {
@@ -46,7 +36,7 @@
       },
       "show_credentials": {
         "title": "MQTT Credentials Generated",
-        "description": "{instructions}"
+        "description": "Use these settings in the Häfele Connect Mesh app.\n\nBroker: {broker_url}\nUsername: {username}\nPassword: {password}\nTopic: {topic}"
       }
     },
     "error": {

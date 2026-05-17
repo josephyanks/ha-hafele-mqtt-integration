@@ -6,14 +6,69 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, DEFAULT_POLLING_MODE, CONF_POLLING_MODE, DEFAULT_POLLING_INTERVAL, DEFAULT_POLLING_TIMEOUT
+from .const import (
+    CONF_MQTT_BROKER,
+    CONF_MQTT_PASSWORD,
+    CONF_MQTT_PORT,
+    CONF_MQTT_USERNAME,
+    CONF_POLLING_MODE,
+    CONF_USE_HA_MQTT,
+    DEFAULT_POLLING_INTERVAL,
+    DEFAULT_POLLING_MODE,
+    DEFAULT_POLLING_TIMEOUT,
+    DOMAIN,
+)
 from .mqtt_client import HafeleMQTTClient
 from .discovery import HafeleDiscovery
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.BUTTON]
+
+
+def _entry_uses_ha_mqtt(entry: ConfigEntry) -> bool:
+    """Return True when the integration should use Home Assistant's MQTT broker."""
+    if CONF_USE_HA_MQTT in entry.data:
+        return bool(entry.data[CONF_USE_HA_MQTT])
+    # Legacy entries: broker host implies a direct connection
+    return not entry.data.get(CONF_MQTT_BROKER)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entry data and light entity unique IDs."""
+    if entry.version < 2:
+        new_data = dict(entry.data)
+        if new_data.get(CONF_MQTT_BROKER) and CONF_USE_HA_MQTT not in new_data:
+            new_data[CONF_USE_HA_MQTT] = False
+        hass.config_entries.async_update_entry(entry, data=new_data, version=2)
+
+    ent_reg = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        uid = entity.unique_id
+        if (
+            not uid
+            or entity.platform != DOMAIN
+            or not uid.endswith("_mqtt")
+            or uid.startswith("hafele_")
+        ):
+            continue
+        addr_part = uid[: -len("_mqtt")]
+        if not addr_part.isdigit():
+            continue
+        new_uid = f"hafele_{addr_part}"
+        if ent_reg.async_get_entity_id(entity.domain, DOMAIN, new_uid):
+            _LOGGER.warning(
+                "Skipping unique_id migration for %s: %s already registered",
+                entity.entity_id,
+                new_uid,
+            )
+            continue
+        _LOGGER.info("Migrating %s unique_id %s -> %s", entity.entity_id, uid, new_uid)
+        ent_reg.async_update_entity(entity.entity_id, new_unique_id=new_uid)
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -27,11 +82,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     polling_mode = entry.data.get(CONF_POLLING_MODE, DEFAULT_POLLING_MODE)
     
     # Get MQTT broker configuration
-    use_ha_mqtt = entry.data.get("use_ha_mqtt", True)
-    mqtt_broker = entry.data.get("mqtt_broker") if not use_ha_mqtt else None
-    mqtt_port = entry.data.get("mqtt_port", 1883) if not use_ha_mqtt else 1883
-    mqtt_username = entry.data.get("mqtt_username") if not use_ha_mqtt else None
-    mqtt_password = entry.data.get("mqtt_password") if not use_ha_mqtt else None
+    use_ha_mqtt = _entry_uses_ha_mqtt(entry)
+    mqtt_broker = entry.data.get(CONF_MQTT_BROKER) if not use_ha_mqtt else None
+    mqtt_port = entry.data.get(CONF_MQTT_PORT, 1883) if not use_ha_mqtt else 1883
+    mqtt_username = entry.data.get(CONF_MQTT_USERNAME) if not use_ha_mqtt else None
+    mqtt_password = entry.data.get(CONF_MQTT_PASSWORD) if not use_ha_mqtt else None
 
     # Initialize MQTT client
     mqtt_client = HafeleMQTTClient(

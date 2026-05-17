@@ -1,0 +1,69 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Verbindung zum Häfele Mesh Gateway",
+        "description": "Wähle aus, wie du die MQTT-Verbindung zu deinem Häfele Mesh-Netzwerk konfigurieren möchtest:",
+        "data": {
+          "setup_type": "Einrichtungsart"
+        }
+      },
+      "automatic": {
+        "title": "Automatisches Setup (Mosquitto Add-on)",
+        "description": "Ein sicherer MQTT-Nutzer wird automatisch im Mosquitto Add-on erstellt. Die Zugangsdaten für die Häfele Mesh Connect App werden im nächsten Schritt angezeigt.",
+        "data": {
+          "topic_prefix": "MQTT Topic Präfix"
+        }
+      },
+      "manual": {
+        "title": "Manuelle MQTT Konfiguration",
+        "description": "Konfiguriere die Verbindung zum MQTT Broker manuell, falls du einen externen Broker oder spezielle Einstellungen nutzt.",
+        "data": {
+          "mqtt_broker": "MQTT Broker Host",
+          "mqtt_port": "MQTT Broker Port",
+          "mqtt_username": "Nutzername",
+          "mqtt_password": "Passwort",
+          "topic_prefix": "MQTT Topic Präfix",
+          "polling_interval": "Abfrage-Intervall (Sekunden)",
+          "polling_timeout": "Abfrage-Timeout (Sekunden)",
+          "polling_mode": "Abfrage-Modus",
+          "enable_groups": "Gruppen-Entitäten aktivieren",
+          "enable_scenes": "Szenen-Entitäten aktivieren"
+        },
+        "data_description": {
+          "mqtt_broker": "Die IP-Adresse oder der Hostname deines MQTT Brokers.",
+          "mqtt_port": "Standard ist 1883.",
+          "topic_prefix": "Das Basis-Topic deines Häfele Mesh Gateways (Standard: Mesh)."
+        }
+      },
+      "show_credentials": {
+        "title": "MQTT Zugangsdaten generiert",
+        "description": "⚠️ **WICHTIG: Speichere diese Daten jetzt!**\n\nGib diese Details in deiner Häfele Mesh Connect App ein:\n\n• **MQTT Broker**: {broker_url}\n• **Nutzername**: {username}\n• **Passwort**: {password}\n• **Topic**: {topic}\n\nKlicke auf **Absenden**, sobald du die Daten in der App konfiguriert hast."
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum MQTT Broker fehlgeschlagen. Bitte prüfe die Einstellungen.",
+      "invalid_auth": "Ungültige Authentifizierung.",
+      "mqtt_broker_required": "Ein MQTT Broker Host ist erforderlich.",
+      "ha_mqtt_not_connected": "Der Home Assistant MQTT Broker ist nicht verbunden.",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte prüfe die Logs."
+    },
+    "abort": {
+      "already_configured": "Dieses Häfele Mesh Gateway ist bereits konfiguriert."
+    }
+  },
+  "selector": {
+    "setup_type": {
+      "options": {
+        "automatic": "Automatisch (Mosquitto Add-on)",
+        "manual": "Manuelle Konfiguration"
+      }
+    },
+    "polling_mode": {
+      "options": {
+        "normal": "Normal",
+        "rotational": "Rotierend (Rotational)"
+      }
+    }
+  }
+}
